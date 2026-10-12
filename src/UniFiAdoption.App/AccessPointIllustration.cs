@@ -1,3 +1,5 @@
+
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 
@@ -17,8 +19,11 @@ internal sealed class AccessPointIllustration : Control
     public AccessPointIllustration()
     {
         SetStyle(
-            ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-            ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer |
+            ControlStyles.ResizeRedraw |
+            ControlStyles.UserPaint, true);
+
         BackColor = Color.White;
         TabStop = false;
         AccessibleRole = AccessibleRole.Graphic;
@@ -26,6 +31,7 @@ internal sealed class AccessPointIllustration : Control
     }
 
     /// <summary>The characters typed so far (shown in the highlight on the label).</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public string Suffix
     {
         get => _suffix;
@@ -36,6 +42,7 @@ internal sealed class AccessPointIllustration : Control
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Image? Photo
     {
         get => _photo;
@@ -49,6 +56,7 @@ internal sealed class AccessPointIllustration : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
+
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -67,40 +75,88 @@ internal sealed class AccessPointIllustration : Control
             DrawDevice(g, width, height - captionHeight);
         }
 
-        using var captionFont = new Font("Segoe UI", Math.Max(7f, captionHeight * 0.42f), FontStyle.Regular, GraphicsUnit.Pixel);
+        using var captionFont = new Font(
+            "Segoe UI",
+            Math.Max(7f, captionHeight * 0.42f),
+            FontStyle.Regular,
+            GraphicsUnit.Pixel);
+
         using var captionBrush = new SolidBrush(Theme.Muted);
-        using var center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        g.DrawString("Back of the access point", captionFont, captionBrush, new RectangleF(0, height - captionHeight, width, captionHeight), center);
+        using var center = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center
+        };
+
+        g.DrawString(
+            "Back of the access point",
+            captionFont,
+            captionBrush,
+            new RectangleF(0, height - captionHeight, width, captionHeight),
+            center);
     }
 
     private void DrawPhoto(Graphics g, RectangleF area)
     {
-        var scale = Math.Min(area.Width / _photo!.Width, area.Height / _photo.Height);
-        var size = new SizeF(_photo.Width * scale, _photo.Height * scale);
+        var scale = Math.Min(
+            area.Width / _photo!.Width,
+            area.Height / _photo.Height);
+
+        var size = new SizeF(
+            _photo.Width * scale,
+            _photo.Height * scale);
+
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.DrawImage(_photo, area.X + ((area.Width - size.Width) / 2), area.Y + ((area.Height - size.Height) / 2), size.Width, size.Height);
+
+        g.DrawImage(
+            _photo,
+            area.X + ((area.Width - size.Width) / 2),
+            area.Y + ((area.Height - size.Height) / 2),
+            size.Width,
+            size.Height);
     }
 
     private void DrawDevice(Graphics g, float width, float height)
     {
         var diameter = Math.Min(width, height) - 16;
-        var disc = new RectangleF((width - diameter) / 2, (height - diameter) / 2, diameter, diameter);
+
+        var disc = new RectangleF(
+            (width - diameter) / 2,
+            (height - diameter) / 2,
+            diameter,
+            diameter);
 
         // Soft shadow, body, and the recessed mounting area.
         using (var shadow = new SolidBrush(Color.FromArgb(28, 0, 0, 0)))
         {
-            g.FillEllipse(shadow, disc.X + 3, disc.Y + 6, disc.Width, disc.Height);
+            g.FillEllipse(
+                shadow,
+                disc.X + 3,
+                disc.Y + 6,
+                disc.Width,
+                disc.Height);
         }
 
-        using (var body = new LinearGradientBrush(disc, Color.FromArgb(0xF7, 0xF9, 0xFA), Color.FromArgb(0xE3, 0xE8, 0xEC), 90f))
+        using (var body = new LinearGradientBrush(
+            disc,
+            Color.FromArgb(0xF7, 0xF9, 0xFA),
+            Color.FromArgb(0xE3, 0xE8, 0xEC),
+            90f))
         {
             g.FillEllipse(body, disc);
         }
 
-        using (var rim = new Pen(Color.FromArgb(0xC4, 0xCD, 0xD3), Math.Max(1.5f, diameter / 110f)))
+        using (var rim = new Pen(
+            Color.FromArgb(0xC4, 0xCD, 0xD3),
+            Math.Max(1.5f, diameter / 110f)))
         {
             g.DrawEllipse(rim, disc);
-            var inner = RectangleF.Inflate(disc, -diameter * 0.09f, -diameter * 0.09f);
+
+            var inner = RectangleF.Inflate(
+                disc,
+                -diameter * 0.09f,
+                -diameter * 0.09f);
+
             rim.Color = Color.FromArgb(0xD6, 0xDE, 0xE3);
             g.DrawEllipse(rim, inner);
         }
@@ -108,7 +164,13 @@ internal sealed class AccessPointIllustration : Control
         // The label.
         var labelWidth = diameter * 0.64f;
         var labelHeight = diameter * 0.36f;
-        var label = new RectangleF(disc.X + ((diameter - labelWidth) / 2), disc.Y + ((diameter - labelHeight) / 2), labelWidth, labelHeight);
+
+        var label = new RectangleF(
+            disc.X + ((diameter - labelWidth) / 2),
+            disc.Y + ((diameter - labelHeight) / 2),
+            labelWidth,
+            labelHeight);
+
         using (var path = RoundedRectangle(label, labelHeight * 0.06f))
         using (var paper = new SolidBrush(Color.White))
         using (var edge = new Pen(Color.FromArgb(0xB8, 0xC1, 0xC8), 1.2f))
@@ -117,17 +179,27 @@ internal sealed class AccessPointIllustration : Control
             g.DrawPath(edge, path);
         }
 
-        // A few barcode-like bars at the top of the label (decorative, fixed pattern).
+        // A decorative barcode pattern.
         var barTop = label.Y + (labelHeight * 0.12f);
         var barHeight = labelHeight * 0.26f;
         var x = label.X + (labelWidth * 0.08f);
         var unit = labelWidth / 120f;
-        int[] pattern = [2, 1, 1, 3, 2, 1, 3, 1, 1, 2, 2, 1, 1, 3, 1, 2, 3, 1, 2, 1, 1, 2, 3, 1, 1, 2, 1, 3, 2, 1, 1, 2, 2, 1, 3, 1];
+
+        int[] pattern =
+        [
+            2, 1, 1, 3, 2, 1, 3, 1, 1, 2, 2, 1,
+            1, 3, 1, 2, 3, 1, 2, 1, 1, 2, 3, 1,
+            1, 2, 1, 3, 2, 1, 1, 2, 2, 1, 3, 1
+        ];
+
         using (var ink = new SolidBrush(Color.FromArgb(0x3A, 0x44, 0x4C)))
         {
-            for (var i = 0; i < pattern.Length && x < label.Right - (labelWidth * 0.08f); i++)
+            for (var i = 0;
+                 i < pattern.Length && x < label.Right - (labelWidth * 0.08f);
+                 i++)
             {
                 var w = pattern[i] * unit;
+
                 if (i % 2 == 0)
                 {
                     g.FillRectangle(ink, x, barTop, w, barHeight);
@@ -137,36 +209,68 @@ internal sealed class AccessPointIllustration : Control
             }
         }
 
-        // "MAC" caption and the address line with the highlighted last four characters.
+        // MAC caption and highlighted final four characters.
         var textHeight = labelHeight * 0.2f;
-        using var small = new Font("Segoe UI", textHeight * 0.62f, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var mono = new Font("Consolas", textHeight * 0.95f, FontStyle.Bold, GraphicsUnit.Pixel);
+
+        using var small = new Font(
+            "Segoe UI", textHeight * 0.62f,
+            FontStyle.Bold, GraphicsUnit.Pixel);
+
+        using var mono = new Font(
+            "Consolas", textHeight * 0.95f,
+            FontStyle.Bold, GraphicsUnit.Pixel);
+
         using var mutedBrush = new SolidBrush(Color.FromArgb(0x8A, 0x95, 0x9D));
         using var inkBrush = new SolidBrush(Theme.Ink);
 
         var macCaptionY = barTop + barHeight + (labelHeight * 0.07f);
-        g.DrawString("MAC", small, mutedBrush, label.X + (labelWidth * 0.08f), macCaptionY);
+
+        g.DrawString(
+            "MAC", small, mutedBrush,
+            label.X + (labelWidth * 0.08f),
+            macCaptionY);
 
         var lineY = macCaptionY + (textHeight * 0.85f);
+
         const string Hidden = "XXXXXXXX";
         var shown = BuildSuffixText();
-        var hiddenSize = g.MeasureString(Hidden, mono, PointF.Empty, StringFormat.GenericTypographic);
-        var shownSize = g.MeasureString("WWWW", mono, PointF.Empty, StringFormat.GenericTypographic);
-        var lineX = label.X + ((labelWidth - hiddenSize.Width - shownSize.Width - 6) / 2);
 
-        g.DrawString(Hidden, mono, mutedBrush, lineX, lineY, StringFormat.GenericTypographic);
-        var highlight = new RectangleF(lineX + hiddenSize.Width + 2, lineY - 2, shownSize.Width + 6, shownSize.Height + 4);
+        var hiddenSize = g.MeasureString(
+            Hidden, mono, PointF.Empty, StringFormat.GenericTypographic);
+
+        var shownSize = g.MeasureString(
+            "WWWW", mono, PointF.Empty, StringFormat.GenericTypographic);
+
+        var lineX = label.X +
+            ((labelWidth - hiddenSize.Width - shownSize.Width - 6) / 2);
+
+        g.DrawString(
+            Hidden, mono, mutedBrush,
+            lineX, lineY, StringFormat.GenericTypographic);
+
+        var highlight = new RectangleF(
+            lineX + hiddenSize.Width + 2,
+            lineY - 2,
+            shownSize.Width + 6,
+            shownSize.Height + 4);
+
         using (var marker = new SolidBrush(Theme.Marker))
         {
             g.FillRectangle(marker, highlight);
         }
 
-        g.DrawString(shown, mono, inkBrush, highlight.X + 3, lineY, StringFormat.GenericTypographic);
+        g.DrawString(
+            shown, mono, inkBrush,
+            highlight.X + 3, lineY,
+            StringFormat.GenericTypographic);
     }
 
     private string BuildSuffixText()
     {
-        var typed = new string(_suffix.Where(char.IsLetterOrDigit).Take(4).ToArray()).ToUpperInvariant();
+        var typed = new string(
+            _suffix.Where(char.IsLetterOrDigit).Take(4).ToArray())
+            .ToUpperInvariant();
+
         return typed.PadRight(4, '_');
     }
 
@@ -174,10 +278,12 @@ internal sealed class AccessPointIllustration : Control
     {
         var d = radius * 2;
         var path = new GraphicsPath();
+
         path.AddArc(r.X, r.Y, d, d, 180, 90);
         path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
         path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
         path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+
         path.CloseFigure();
         return path;
     }
