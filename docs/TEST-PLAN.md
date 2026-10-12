@@ -1,5 +1,31 @@
 # Test plan
 
+## Version 2 additions
+
+Automated, in `tests/UniFiAdoption.Tests/InventoryTests.cs`:
+
+* the classifier for every group, including "SSH closed right after setup" (shown as waiting, not as a
+  problem) and failed jobs that clear after a re-check;
+* inventory merging by MAC, and non-Ubiquiti devices being ignored;
+* the live list sorting ready and adopted access points, with an adopted one tried exactly once;
+* a batch sending several access points, then detecting adoption when the password changes;
+* retries of temporary failures and the concurrency limit;
+* Stop before start; already-adopted access points being skipped; test-mode batches changing nothing;
+* the hand-off message and the built-in JSON reader.
+
+The real-SSH test `IntegrationTests.LiveListDetectsAdoptionWhenTheControllerChangesThePassword` runs
+the whole rule against the simulated access point.
+
+Lab checks to add to part B below:
+
+* With several factory-reset AC Pros on one switch: open the app, check they all appear as **Ready**
+  within about a minute, set them up together, approve them in the controller, and check they move to
+  **Already adopted** within about a minute of approval.
+* With an adopted AC Pro on the same network: check it lands in **Already adopted** and that the
+  controller's logs show at most one failed login from the app per search.
+* During approval: note how long SSH is unavailable while the access point provisions. If it is longer
+  than 30 minutes, raise the grace period in `Classifier`.
+
 ## A. Automated tests (run on every build)
 
 `dotnet run --project tests/UniFiAdoption.Tests -c Release` — 64 tests, no network or device needed.

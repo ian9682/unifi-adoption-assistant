@@ -1,18 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The Windows window. All logic lives in UniFiAdoption.Core; this project is presentation only.
-       Packaging options (self-contained, single file) are passed by build/publish.ps1. -->
+       Version 2 targets .NET Framework 4.8, which is built into Windows 10 (1903+) and 11, so nothing has
+       to be installed and no runtime is bundled. Costura packs SSH.NET and its dependencies into the exe,
+       so the result is still one file. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>UniFiAdoptionAssistant</AssemblyName>
     <RootNamespace>UniFiAdoption.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
-    <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <DebugType>embedded</DebugType>
     <Company>One Acre Fund – ITO Networks Team</Company>
     <Description>Points UniFi access points at One Acre Fund's centralized UniFi controller.</Description>
   </PropertyGroup>
@@ -21,6 +24,10 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets\logo.png" LogicalName="logo.png" Condition="Exists('Assets\logo.png')" />
     <EmbeddedResource Include="Assets\leaf-white.png" LogicalName="leaf-white.png" Condition="Exists('Assets\leaf-white.png')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Costura.Fody" Version="6.0.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

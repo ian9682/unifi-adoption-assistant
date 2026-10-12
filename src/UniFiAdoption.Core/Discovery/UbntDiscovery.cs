@@ -1,7 +1,5 @@
-using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.Versioning;
 using System.Text;
 using UniFiAdoption.Core.Networking;
 
@@ -53,50 +51,46 @@ public static class UbntDiscoveryProtocol
     private const byte FieldModelDisplayAlt = 0x15;
     private const byte FieldIsDefault = 0x17;
 
-    public static byte[] CreateRequest() => [0x01, 0x00, 0x00, 0x00];
+    public static byte[] CreateRequest() => new byte[] { 0x01, 0x00, 0x00, 0x00 };
 
     /// <summary>Parses a reply. Returns null for anything that is not a well-formed reply with a usable MAC.</summary>
-    public static UbntDiscoveryReply? TryParse(ReadOnlySpan<byte> packet, IPAddress source)
+    public static UbntDiscoveryReply? TryParse(byte[] packet, int length, IPAddress source)
     {
-        if (packet.Length < 4 || packet[0] != 0x01 || packet[1] != 0x00)
+        if (packet is null || length < 4 || length > packet.Length || packet[0] != 0x01 || packet[1] != 0x00)
         {
             return null;
         }
 
-        int declaredLength = BinaryPrimitives.ReadUInt16BigEndian(packet.Slice(2, 2));
-        var payload = packet[4..];
-        if (declaredLength < payload.Length)
-        {
-            payload = payload[..declaredLength];
-        }
+        var declared = (packet[2] << 8) | packet[3];
+        var end = Math.Min(length, 4 + declared);
 
         MacAddress? mac = null;
         var addresses = new List<IPAddress>();
         string? hostname = null, model = null, modelDisplay = null, firmware = null;
         bool? isDefault = null;
 
-        var position = 0;
-        while (position + 3 <= payload.Length)
+        var position = 4;
+        while (position + 3 <= end)
         {
-            var type = payload[position];
-            int length = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(position + 1, 2));
+            var type = packet[position];
+            var fieldLength = (packet[position + 1] << 8) | packet[position + 2];
             position += 3;
-            if (position + length > payload.Length)
+            if (position + fieldLength > end)
             {
                 break; // truncated field: keep what was parsed so far
             }
 
-            var value = payload.Slice(position, length);
-            position += length;
+            var valueStart = position;
+            position += fieldLength;
 
             switch (type)
             {
-                case FieldMac when length == 6:
-                    mac ??= MacAddress.FromBytes(value);
+                case FieldMac when fieldLength == 6:
+                    mac ??= MacAddress.FromBytes(packet, valueStart);
                     break;
-                case FieldMacIp when length == 10:
-                    mac ??= MacAddress.FromBytes(value[..6]);
-                    var address = new IPAddress(value.Slice(6, 4));
+                case FieldMacIp when fieldLength == 10:
+                    mac ??= MacAddress.FromBytes(packet, valueStart);
+                    var address = new IPAddress(new[] { packet[valueStart + 6], packet[valueStart + 7], packet[valueStart + 8], packet[valueStart + 9] });
                     if (!addresses.Contains(address))
                     {
                         addresses.Add(address);
@@ -104,38 +98,40 @@ public static class UbntDiscoveryProtocol
 
                     break;
                 case FieldFirmware:
-                    firmware = Text(value);
+                    firmware = Text(packet, valueStart, fieldLength);
                     break;
                 case FieldHostname:
-                    hostname = Text(value);
+                    hostname = Text(packet, valueStart, fieldLength);
                     break;
                 case FieldModelShort:
-                    model = Text(value);
+                    model = Text(packet, valueStart, fieldLength);
                     break;
                 case FieldModelDisplay:
-                    modelDisplay = Text(value);
+                    modelDisplay = Text(packet, valueStart, fieldLength);
                     break;
                 case FieldModelDisplayAlt:
-                    modelDisplay ??= Text(value);
+                    modelDisplay ??= Text(packet, valueStart, fieldLength);
                     break;
-                case FieldIsDefault when length >= 1:
-                    isDefault = value[0] != 0;
+                case FieldIsDefault when fieldLength >= 1:
+                    isDefault = packet[valueStart] != 0;
                     break;
             }
         }
 
-        if (mac is not { IsUsableUnicast: true } validMac)
+        if (mac is null || !mac.Value.IsUsableUnicast)
         {
             return null;
         }
 
-        return new UbntDiscoveryReply(source, validMac, addresses, hostname, model, modelDisplay, firmware, isDefault);
+        return new UbntDiscoveryReply(source, mac.Value, addresses, hostname, model, modelDisplay, firmware, isDefault);
     }
 
+    public static UbntDiscoveryReply? TryParse(byte[] packet, IPAddress source) => TryParse(packet, packet?.Length ?? 0, source);
+
     /// <summary>Decodes a text field defensively: printable characters only, bounded length (it ends up in logs).</summary>
-    private static string? Text(ReadOnlySpan<byte> value)
+    private static string? Text(byte[] packet, int start, int length)
     {
-        var text = Encoding.UTF8.GetString(value);
+        var text = Encoding.UTF8.GetString(packet, start, length);
         var cleaned = new string(text.Where(c => !char.IsControl(c)).Take(96).ToArray()).Trim();
         return cleaned.Length == 0 ? null : cleaned;
     }
@@ -156,8 +152,7 @@ public sealed class UbntDiscoveryScanner : IUbntDiscovery
 
         var replies = perInterface
             .SelectMany(r => r.Replies)
-            .GroupBy(r => (r.Mac, r.Source))
-            .Select(g => g.First())
+            .DistinctByKey(r => r.Mac.Hex + "|" + r.Source)
             .ToList();
 
         return new UbntDiscoveryResult(replies, perInterface.Any(r => r.AccessDenied));
@@ -168,100 +163,87 @@ public sealed class UbntDiscoveryScanner : IUbntDiscovery
     {
         var replies = new List<UbntDiscoveryReply>();
         var accessDenied = false;
-
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        UdpClient client;
         try
         {
-            socket.EnableBroadcast = true;
-            if (OperatingSystem.IsWindows())
-            {
-                DisableUdpConnectionReset(socket);
-            }
-
-            socket.Bind(new IPEndPoint(nic.Address, 0));
+            client = new UdpClient(new IPEndPoint(nic.Address, 0)) { EnableBroadcast = true };
         }
         catch (SocketException ex)
         {
             return new UbntDiscoveryResult(replies, ex.SocketErrorCode == SocketError.AccessDenied);
         }
 
-        // Limited broadcast plus the adapter's directed broadcast address.
-        var targets = new[] { IPAddress.Broadcast, nic.Subnet.BroadcastAddress }.Distinct().ToArray();
-        var request = UbntDiscoveryProtocol.CreateRequest();
-
-        using var listenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        listenCts.CancelAfter(listenTime);
-        var receiveTask = ReceiveLoopAsync(socket, replies, listenCts.Token);
-
-        // Send twice, a moment apart, in case a packet is lost on a busy or wireless link.
-        for (var attempt = 0; attempt < 2 && !listenCts.IsCancellationRequested; attempt++)
+        using (client)
         {
-            foreach (var target in targets)
+            if (Compat.IsWindows)
             {
-                try
-                {
-                    await socket.SendToAsync(request, SocketFlags.None, new IPEndPoint(target, _port), listenCts.Token)
-                        .ConfigureAwait(false);
-                }
-                catch (SocketException ex)
-                {
-                    accessDenied |= ex.SocketErrorCode == SocketError.AccessDenied;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
+                DisableUdpConnectionReset(client.Client);
             }
+
+            var receiveLoop = ReceiveLoopAsync(client, replies);
+            var deadline = DateTime.UtcNow + listenTime;
+            var request = UbntDiscoveryProtocol.CreateRequest();
+            var targets = new[] { IPAddress.Broadcast, nic.Subnet.BroadcastAddress }.Distinct().ToArray();
 
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(400), listenCts.Token).ConfigureAwait(false);
+                // Send twice, a moment apart, in case a packet is lost on a busy or wireless link.
+                for (var attempt = 0; attempt < 2; attempt++)
+                {
+                    foreach (var target in targets)
+                    {
+                        try
+                        {
+                            await client.SendAsync(request, request.Length, new IPEndPoint(target, _port)).ConfigureAwait(false);
+                        }
+                        catch (SocketException ex)
+                        {
+                            accessDenied |= ex.SocketErrorCode == SocketError.AccessDenied;
+                        }
+                    }
+
+                    await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken).ConfigureAwait(false);
+                }
+
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining > TimeSpan.Zero)
+                {
+                    await Task.WhenAny(receiveLoop, Task.Delay(remaining, cancellationToken)).ConfigureAwait(false);
+                }
             }
-            catch (OperationCanceledException)
+            finally
             {
-                break;
+                client.Close(); // ends the pending receive
+                await receiveLoop.ConfigureAwait(false);
             }
         }
 
-        await receiveTask.ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-
         lock (replies)
         {
             return new UbntDiscoveryResult(replies.ToList(), accessDenied);
         }
     }
 
-    private static async Task ReceiveLoopAsync(Socket socket, List<UbntDiscoveryReply> replies, CancellationToken token)
+    private static async Task ReceiveLoopAsync(UdpClient client, List<UbntDiscoveryReply> replies)
     {
-        var buffer = new byte[2048];
-        while (!token.IsCancellationRequested)
+        while (true)
         {
-            SocketReceiveFromResult received;
+            UdpReceiveResult received;
             try
             {
-                received = await socket.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), token)
-                    .ConfigureAwait(false);
+                received = await client.ReceiveAsync().ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (SocketException ex) when (ex.SocketErrorCode is SocketError.ConnectionReset or SocketError.MessageSize)
+            catch (SocketException ex) when (ex.IsConnectionReset() || ex.SocketErrorCode == SocketError.MessageSize)
             {
                 continue;
             }
-            catch (SocketException)
+            catch (Exception ex) when (ex is SocketException or ObjectDisposedException or NullReferenceException or InvalidOperationException)
             {
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
+                return; // socket closed
             }
 
-            var source = ((IPEndPoint)received.RemoteEndPoint).Address;
-            var reply = UbntDiscoveryProtocol.TryParse(buffer.AsSpan(0, received.ReceivedBytes), source);
+            var reply = UbntDiscoveryProtocol.TryParse(received.Buffer, received.Buffer.Length, received.RemoteEndPoint.Address);
             if (reply is not null)
             {
                 lock (replies)
@@ -276,13 +258,12 @@ public sealed class UbntDiscoveryScanner : IUbntDiscovery
     /// Windows reports an ICMP "port unreachable" for an earlier datagram as a receive error
     /// (WSAECONNRESET). Turning that behaviour off keeps the receive loop running.
     /// </summary>
-    [SupportedOSPlatform("windows")]
     private static void DisableUdpConnectionReset(Socket socket)
     {
         const int SioUdpConnReset = unchecked((int)0x9800000C);
         try
         {
-            socket.IOControl(SioUdpConnReset, [0, 0, 0, 0], null);
+            socket.IOControl(SioUdpConnReset, new byte[] { 0, 0, 0, 0 }, null);
         }
         catch (SocketException)
         {

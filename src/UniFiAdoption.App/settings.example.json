@@ -27,6 +27,15 @@
   "VerifySeconds": 45,
   "VerifyPollSeconds": 5,
 
+  // Live list and batches (version 2).
+  "BatchConcurrency": 3,
+  "BatchVerifySeconds": 15,
+  "DiscoveryIntervalSeconds": 30,
+  "ArpSweepIntervalSeconds": 120,
+  "RecheckWaitingSeconds": 45,
+  "UnreachableAfterSeconds": 300,
+  "CheckConcurrency": 4,
+
   // Optional: "80:2A:A8:12:AB:CD": "SHA256:..." to require a specific SSH host key for a device.
   "PinnedHostKeys": {},
 

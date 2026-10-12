@@ -60,7 +60,7 @@ public sealed class DiagnosticLog
 
     public void AddSecret(string? secret)
     {
-        if (!string.IsNullOrEmpty(secret) && secret.Length >= 4)
+        if (secret is { Length: >= 4 })
         {
             lock (_gate)
             {
@@ -95,12 +95,12 @@ public sealed class DiagnosticLog
         {
             foreach (var secret in _secrets)
             {
-                line = line.Replace(secret, "********", StringComparison.Ordinal);
+                line = line.Replace(secret, "********");
             }
 
             if (line.Length > MaxLineLength)
             {
-                line = line[..MaxLineLength] + " …(truncated)";
+                line = line.Substring(0, MaxLineLength) + " …(truncated)";
             }
 
             _lines.Add(line);

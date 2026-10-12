@@ -1,7 +1,5 @@
-using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
-using System.Numerics;
 
 namespace UniFiAdoption.Core.Networking;
 
@@ -10,8 +8,11 @@ public sealed class Ipv4Subnet
 {
     public Ipv4Subnet(uint anyAddressInSubnet, int prefixLength)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(prefixLength);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(prefixLength, 32);
+        if (prefixLength < 0 || prefixLength > 32)
+        {
+            throw new ArgumentOutOfRangeException(nameof(prefixLength));
+        }
+
         PrefixLength = prefixLength;
         Network = anyAddressInSubnet & MaskFor(prefixLength);
     }
@@ -43,7 +44,12 @@ public sealed class Ipv4Subnet
     public static Ipv4Subnet FromAddressAndMask(IPAddress address, IPAddress mask)
     {
         var maskValue = ToUInt32(mask);
-        var prefix = BitOperations.PopCount(maskValue);
+        var prefix = 0;
+        for (var bits = maskValue; bits != 0; bits &= bits - 1)
+        {
+            prefix++;
+        }
+
         if (MaskFor(prefix) != maskValue)
         {
             throw new ArgumentException("The subnet mask is not contiguous.", nameof(mask));
@@ -59,14 +65,13 @@ public sealed class Ipv4Subnet
             throw new ArgumentException("Only IPv4 addresses are supported.", nameof(address));
         }
 
-        return BinaryPrimitives.ReadUInt32BigEndian(address.GetAddressBytes());
+        var b = address.GetAddressBytes();
+        return ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
     }
 
     public static IPAddress ToAddress(uint value)
     {
-        Span<byte> bytes = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(bytes, value);
-        return new IPAddress(bytes);
+        return new IPAddress(new[] { (byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value });
     }
 
     public bool Contains(IPAddress address) =>

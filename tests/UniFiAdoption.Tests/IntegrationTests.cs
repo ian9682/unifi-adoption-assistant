@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using UniFiAdoption.Core.Configuration;
 using UniFiAdoption.Core.Discovery;
+using UniFiAdoption.Core.Inventory;
 using UniFiAdoption.Core.Logging;
 using UniFiAdoption.Core.Networking;
 using UniFiAdoption.Core.Security;
@@ -46,20 +47,20 @@ internal sealed class IntegrationTests
         configure?.Invoke(settings);
         settings.Normalize();
 
-        using var responder = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+        var responder = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         var discoveryPort = ((IPEndPoint)responder.Client.LocalEndPoint!).Port;
-        using var cts = new CancellationTokenSource();
         var serve = Task.Run(async () =>
         {
             try
             {
                 while (true)
                 {
-                    var request = await responder.ReceiveAsync(cts.Token);
-                    await responder.SendAsync(DiscoveryProtocolTests.BuildReply(mac, "127.0.0.1"), request.RemoteEndPoint, cts.Token);
+                    var request = await responder.ReceiveAsync();
+                    var reply = DiscoveryProtocolTests.BuildReply(mac, "127.0.0.1");
+                    await responder.SendAsync(reply, reply.Length, request.RemoteEndPoint);
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
             {
             }
         });
@@ -76,8 +77,8 @@ internal sealed class IntegrationTests
             new SshNetConnector(),
             hostKeys ?? new JsonHostKeyStore(Path.Combine(Path.GetTempPath(), $"it-hk-{Guid.NewGuid():N}.json")),
             null);
-        var report = await new AdoptionWorkflow(settings, deps, log).RunAsync(new AdoptionRequest(MacAddress.Parse(mac).Hex[^4..], testMode, null), null, CancellationToken.None);
-        cts.Cancel();
+        var report = await new AdoptionWorkflow(settings, deps, log).RunAsync(new AdoptionRequest(MacAddress.Parse(mac).Hex.Substring(8), testMode, null), null, CancellationToken.None);
+        responder.Close();
         await serve;
         return (report, log);
     }
@@ -122,11 +123,11 @@ internal sealed class IntegrationTests
     }
 
     [Test("integration")]
-    public async Task WrongPasswordIsReportedAsAuthenticationFailure()
+    public async Task RefusedFactoryPasswordIsReportedAsAlreadyAdopted()
     {
         ResetDevice();
         var (report, _) = await RunAsync(configure: s => s.FactoryDefaultPassword = "not-the-password");
-        Assert.Equal(AdoptionOutcome.AuthenticationFailed, report.Outcome);
+        Assert.Equal(AdoptionOutcome.AlreadyAdopted, report.Outcome);
         Assert.Equal("http://unifi:8080/inform", DeviceInform);
     }
 
@@ -165,6 +166,72 @@ internal sealed class IntegrationTests
         finally
         {
             File.Move(hidden, tool);
+        }
+    }
+
+    private static void SetDevicePassword(string password)
+    {
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("chpasswd")
+        {
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+        })!;
+        process.StandardInput.WriteLine($"ubnt:{password}");
+        process.StandardInput.Close();
+        process.WaitForExit();
+    }
+
+    [Test("integration")]
+    public async Task LiveListDetectsAdoptionWhenTheControllerChangesThePassword()
+    {
+        ResetDevice();
+        SetDevicePassword("ubnt");
+        try
+        {
+            var settings = new AssistantSettings
+            {
+                InformUrl = InformUrl, SshPort = Port, BatchVerifySeconds = 1, VerifyPollSeconds = 1,
+                RecheckWaitingSeconds = 0, DiscoveryIntervalSeconds = 1,
+            };
+            var loopback = new LocalInterfaceInfo("lo", "loopback", IPAddress.Loopback,
+                Ipv4Subnet.FromAddressAndMask(IPAddress.Loopback, IPAddress.Parse("255.255.255.0")), null, false, false);
+            var reply = UbntDiscoveryProtocol.TryParse(DiscoveryProtocolTests.BuildReply(Mac, "127.0.0.1"), IPAddress.Loopback)!;
+            var deps = new WorkflowDependencies(
+                new FakeNetwork(loopback), new FakeDiscovery(new[] { reply }), new NullNeighborScanner(), new NetworkControllerProbe(),
+                new TcpSshBannerProbe(), new SshNetConnector(),
+                new JsonHostKeyStore(Path.Combine(Path.GetTempPath(), $"it-hk-{Guid.NewGuid():N}.json")), null);
+            using var host = new AssistantHost(settings, deps, new DiagnosticLog(null));
+            host.Monitor.Tick = TimeSpan.FromMilliseconds(200);
+            host.Monitor.Start();
+            var mac = MacAddress.Parse(Mac);
+
+            async Task<bool> WaitFor(DeviceStatus status)
+            {
+                for (var i = 0; i < 150; i++)
+                {
+                    if (host.Inventory.Get(mac)?.Status == status)
+                    {
+                        return true;
+                    }
+
+                    await Task.Delay(200);
+                }
+
+                return false;
+            }
+
+            Assert.True(await WaitFor(DeviceStatus.Ready), $"ready; was {host.Inventory.Get(mac)?.Status}");
+            var result = await host.Batches.RunAsync(new[] { mac }, false, null, CancellationToken.None);
+            Assert.Equal(AdoptionOutcome.PendingAdoption, result.Items.Single().Outcome);
+            Assert.Equal(InformUrl, DeviceInform);
+            Assert.True(await WaitFor(DeviceStatus.WaitingForApproval), "waiting for approval");
+
+            SetDevicePassword("changed-by-the-controller"); // what adoption does to the factory password
+            Assert.True(await WaitFor(DeviceStatus.Adopted), $"adopted; was {host.Inventory.Get(mac)?.Status} ({host.Inventory.Get(mac)?.Reason})");
+        }
+        finally
+        {
+            SetDevicePassword("ubnt");
         }
     }
 }

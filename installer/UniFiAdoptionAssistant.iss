@@ -2,10 +2,10 @@
 ; Built by build/publish.ps1, which passes AppVersion and SourceDir.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "2.0.0"
 #endif
 #ifndef SourceDir
-  #define SourceDir "..\artifacts\publish\win-x86"
+  #define SourceDir "..\artifacts\publish\app"
 #endif
 
 [Setup]
@@ -31,6 +31,9 @@ Name: "desktopicon"; Description: "Put a shortcut on the desktop"
 [Files]
 Source: "{#SourceDir}\UniFiAdoptionAssistant.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\settings.example.json"; DestDir: "{app}"; Flags: ignoreversion
+#if FileExists(AddBackslash(SourceDir) + "UniFiAdoptionAssistant.exe.config")
+Source: "{#SourceDir}\UniFiAdoptionAssistant.exe.config"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 #if FileExists(AddBackslash(SourceDir) + "settings.json")
 Source: "{#SourceDir}\settings.json"; DestDir: "{app}"; Flags: ignoreversion
 #endif

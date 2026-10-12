@@ -15,7 +15,14 @@ public sealed record LocalInterfaceInfo(
     bool LooksVirtual)
 {
     /// <summary>169.254.x.x: Windows assigned this itself because no DHCP server answered.</summary>
-    public bool IsSelfAssigned => Address.GetAddressBytes() is [169, 254, _, _];
+    public bool IsSelfAssigned
+    {
+        get
+        {
+            var b = Address.GetAddressBytes();
+            return b[0] == 169 && b[1] == 254;
+        }
+    }
 
     public override string ToString() =>
         $"{Name} ({Description}) {Address} in {Subnet}, gateway {Gateway?.ToString() ?? "none"}" +

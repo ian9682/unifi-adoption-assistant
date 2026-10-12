@@ -47,7 +47,7 @@ internal static class Assert
 
     public static void Contains(string expectedSubstring, string? actual, string? message = null)
     {
-        if (actual is null || !actual.Contains(expectedSubstring, StringComparison.Ordinal))
+        if (actual is null || actual.IndexOf(expectedSubstring, StringComparison.Ordinal) < 0)
         {
             throw new AssertionException($"{message ?? "Substring not found"}. Expected to find: '{expectedSubstring}' in '{actual}'.");
         }
@@ -55,7 +55,7 @@ internal static class Assert
 
     public static void DoesNotContain(string unexpected, string? actual, string? message = null)
     {
-        if (actual is not null && actual.Contains(unexpected, StringComparison.Ordinal))
+        if (actual is not null && actual.IndexOf(unexpected, StringComparison.Ordinal) >= 0)
         {
             throw new AssertionException($"{message ?? "Unexpected substring found"}: '{unexpected}'.");
         }
@@ -74,7 +74,7 @@ internal static class Program
                 .Select(m => (Type: t, Method: m, Attribute: m.GetCustomAttribute<TestAttribute>())))
             .Where(x => x.Attribute is not null)
             .Where(x => includeIntegration || x.Attribute!.Category != "integration")
-            .Where(x => filter is null || $"{x.Type.Name}.{x.Method.Name}".Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .Where(x => filter is null || $"{x.Type.Name}.{x.Method.Name}".IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
             .OrderBy(x => x.Type.Name).ThenBy(x => x.Method.Name)
             .ToList();
 

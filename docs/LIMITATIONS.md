@@ -1,5 +1,16 @@
 # Known limitations and firmware assumptions
 
+## The adoption rule (version 2)
+
+The app treats "SSH open and factory password refused" as adopted. That is the ITO Networks Team's
+rule, and it fits how the controller behaves: adoption replaces the factory password. Two consequences
+to keep in mind:
+
+* An access point still configured by an old or different controller also refuses the factory
+  password, so it is shown as adopted. If an access point in **Already adopted** has no Wi-Fi, it may
+  need a factory reset by the ITO Networks Team.
+* An access point with SSH closed is never counted as adopted. It is shown under **Needs a look**.
+
 ## Firmware assumptions (to confirm in the lab, see TEST-PLAN.md part B)
 
 * The access point runs UniFi AP firmware with an SSH server (dropbear) on port 22 and a
@@ -49,6 +60,6 @@ against a simulated device only.
 * Only IPv4.
 * English only.
 * The installer and exe are unsigned unless a certificate is provided at build time.
-* The exe is about 48 MB because it includes .NET 10. Retargeting to .NET Framework 4.8 (built into
-  Windows) would bring it to a few MB; that is a planned follow-up.
+* Version 2 needs .NET Framework 4.8. It is built into Windows 10 version 1903 and later and into
+  Windows 11. Older Windows 10 builds (for example LTSC 2019) need it installed once from Microsoft.
 * The blue SmartScreen warning cannot be removed from inside the program; see DEPLOYMENT.md.

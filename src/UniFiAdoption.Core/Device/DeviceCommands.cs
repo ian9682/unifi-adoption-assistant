@@ -22,7 +22,7 @@ public sealed record ControllerTarget(string InformUrl, string Host, int Port, b
         target = null;
         problem = null;
 
-        if (string.IsNullOrWhiteSpace(informUrl) || !Uri.TryCreate(informUrl.Trim(), UriKind.Absolute, out var uri))
+        if (string.IsNullOrWhiteSpace(informUrl) || !Uri.TryCreate(informUrl!.Trim(), UriKind.Absolute, out var uri))
         {
             problem = "InformUrl is not a valid absolute URL.";
             return false;
@@ -116,20 +116,20 @@ public static class DeviceCommands
     }
 
     /// <summary>The legacy interactive sequence, used only when mca-cli-op is missing.</summary>
-    public static IReadOnlyList<InteractiveStep> InteractiveSetInform(ControllerTarget controller) =>
-    [
+    public static IReadOnlyList<InteractiveStep> InteractiveSetInform(ControllerTarget controller) => new[]
+    {
         new InteractiveStep("mca-cli", new Regex(@"[#>]\s*$", RegexOptions.CultureInvariant)),
         new InteractiveStep(
             $"set-inform {controller.InformUrl}",
             new Regex(@"adoption request sent|error|invalid|unknown|not found", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)),
         new InteractiveStep("exit", new Regex(@"[#$>]\s*$", RegexOptions.CultureInvariant)),
-    ];
+    };
 
     public static string DescribeInteractiveSetInform(ControllerTarget controller) =>
         $"mca-cli  (interactive)  then  set-inform {controller.InformUrl}  then  exit";
 
     /// <summary>Single-quotes a value for a POSIX shell.</summary>
-    public static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+    public static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
     /// <summary>
     /// Decides whether set-inform was accepted. The confirmation text is decisive; otherwise a zero

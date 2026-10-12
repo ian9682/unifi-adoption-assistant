@@ -84,7 +84,7 @@ internal sealed class SubnetTests
         var hosts = subnet.Hosts().ToList();
         Assert.Equal(254, hosts.Count);
         Assert.Equal(IPAddress.Parse("192.168.10.1"), hosts[0]);
-        Assert.Equal(IPAddress.Parse("192.168.10.254"), hosts[^1]);
+        Assert.Equal(IPAddress.Parse("192.168.10.254"), hosts[hosts.Count - 1]);
         Assert.True(subnet.Contains(IPAddress.Parse("192.168.10.200")));
         Assert.False(subnet.Contains(IPAddress.Parse("192.168.11.1")));
     }
@@ -130,21 +130,22 @@ internal sealed class DiscoveryProtocolTests
             fields.AddRange(value);
         }
 
-        var macBytes = Convert.FromHexString(MacAddress.Parse(mac).Hex);
+        var hex = MacAddress.Parse(mac).Hex;
+        var macBytes = Enumerable.Range(0, 6).Select(i => Convert.ToByte(hex.Substring(i * 2, 2), 16)).ToArray();
         Add(0x02, macBytes.Concat(IPAddress.Parse(ip).GetAddressBytes()).ToArray());
         Add(0x01, macBytes);
         if (includeExtras)
         {
-            Add(0x03, "BZ.qca956x.v6.6.77.15402.240924.1623"u8.ToArray());
-            Add(0x0B, "UAP-AC-Pro"u8.ToArray());
-            Add(0x0C, "U7PG2"u8.ToArray());
-            Add(0x14, "UAP-AC-Pro-Gen2"u8.ToArray());
-            Add(0x0A, [0, 0, 1, 0]);
+            Add(0x03, System.Text.Encoding.UTF8.GetBytes("BZ.qca956x.v6.6.77.15402.240924.1623"));
+            Add(0x0B, System.Text.Encoding.UTF8.GetBytes("UAP-AC-Pro"));
+            Add(0x0C, System.Text.Encoding.UTF8.GetBytes("U7PG2"));
+            Add(0x14, System.Text.Encoding.UTF8.GetBytes("UAP-AC-Pro-Gen2"));
+            Add(0x0A, new byte[] { 0, 0, 1, 0 });
         }
 
         if (isDefault is { } d)
         {
-            Add(0x17, [d ? (byte)1 : (byte)0]);
+            Add(0x17, new[] { d ? (byte)1 : (byte)0 });
         }
 
         return new byte[] { 0x01, 0x00, (byte)(fields.Count >> 8), (byte)fields.Count }.Concat(fields).ToArray();
@@ -166,15 +167,15 @@ internal sealed class DiscoveryProtocolTests
     public void IgnoresMalformedPacketsWithoutThrowing()
     {
         var source = IPAddress.Parse("192.168.10.23");
-        Assert.Null(UbntDiscoveryProtocol.TryParse([], source));
-        Assert.Null(UbntDiscoveryProtocol.TryParse([0x01, 0x00, 0x00, 0x00], source)); // our own request echoed back
-        Assert.Null(UbntDiscoveryProtocol.TryParse([0x02, 0x00, 0x00, 0x00], source));
-        Assert.Null(UbntDiscoveryProtocol.TryParse([0x01, 0x00, 0x00, 0x09, 0x01, 0x00, 0x06, 0xAA, 0xBB], source)); // truncated MAC
+        Assert.Null(UbntDiscoveryProtocol.TryParse(new byte[0], source));
+        Assert.Null(UbntDiscoveryProtocol.TryParse(new byte[] { 0x01, 0x00, 0x00, 0x00 }, source)); // our own request echoed back
+        Assert.Null(UbntDiscoveryProtocol.TryParse(new byte[] { 0x02, 0x00, 0x00, 0x00 }, source));
+        Assert.Null(UbntDiscoveryProtocol.TryParse(new byte[] { 0x01, 0x00, 0x00, 0x09, 0x01, 0x00, 0x06, 0xAA, 0xBB }, source)); // truncated MAC
 
         var good = BuildReply("80:2A:A8:12:AB:CD", "192.168.10.23");
         for (var cut = 0; cut < good.Length; cut++)
         {
-            _ = UbntDiscoveryProtocol.TryParse(good.AsSpan(0, cut), source); // must never throw
+            _ = UbntDiscoveryProtocol.TryParse(good, cut, source); // must never throw
         }
 
         var random = new Random(1234);
@@ -195,33 +196,32 @@ internal sealed class DiscoveryProtocolTests
     [Test]
     public async Task ScannerFindsAResponderOverRealUdp()
     {
-        using var responder = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+        var responder = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         var port = ((IPEndPoint)responder.Client.LocalEndPoint!).Port;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serve = Task.Run(async () =>
         {
-            while (!cts.IsCancellationRequested)
+            try
             {
-                var request = await responder.ReceiveAsync(cts.Token);
-                if (request.Buffer.SequenceEqual(UbntDiscoveryProtocol.CreateRequest()))
+                while (true)
                 {
-                    var reply = BuildReply("80:2A:A8:12:AB:CD", "127.0.0.1");
-                    await responder.SendAsync(reply, request.RemoteEndPoint, cts.Token);
+                    var request = await responder.ReceiveAsync();
+                    if (request.Buffer.SequenceEqual(UbntDiscoveryProtocol.CreateRequest()))
+                    {
+                        var reply = BuildReply("80:2A:A8:12:AB:CD", "127.0.0.1");
+                        await responder.SendAsync(reply, reply.Length, request.RemoteEndPoint);
+                    }
                 }
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
+            {
             }
         });
 
         var loopback = new LocalInterfaceInfo("lo", "loopback", IPAddress.Loopback,
             Ipv4Subnet.FromAddressAndMask(IPAddress.Loopback, IPAddress.Parse("255.255.255.0")), null, false, false);
-        var result = await new UbntDiscoveryScanner(port).DiscoverAsync([loopback], TimeSpan.FromSeconds(1.5), CancellationToken.None);
-        cts.Cancel();
-        try
-        {
-            await serve;
-        }
-        catch (OperationCanceledException)
-        {
-        }
+        var result = await new UbntDiscoveryScanner(port).DiscoverAsync(new[] { loopback }, TimeSpan.FromSeconds(1.5), CancellationToken.None);
+        responder.Close();
+        await serve;
 
         var reply = result.Replies.Single();
         Assert.Equal(MacAddress.Parse("802AA812ABCD"), reply.Mac);
@@ -239,7 +239,7 @@ internal sealed class CandidateResolverTests
         UbntDiscoveryProtocol.TryParse(DiscoveryProtocolTests.BuildReply(mac, ip), IPAddress.Parse(ip))!;
 
     private static LocateResult Resolve(string suffix, UbntDiscoveryReply[] replies, NeighborEntry[] arp) =>
-        CandidateResolver.Resolve(MacSuffix.Validate(suffix).Suffix!, replies, arp, [Lan], new AssistantSettings().AllUbiquitiOuis, true);
+        CandidateResolver.Resolve(MacSuffix.Validate(suffix).Suffix!, replies, arp, new[] { Lan }, new AssistantSettings().AllUbiquitiOuis, true);
 
     [Test]
     public void FindsTheSingleMatch()

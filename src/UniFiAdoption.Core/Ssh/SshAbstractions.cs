@@ -8,10 +8,10 @@ public enum CredentialSource
     /// <summary>The publicly documented factory login of a reset UniFi device.</summary>
     FactoryDefault,
 
-    /// <summary>Typed by IT in the IT settings window for this session only.</summary>
+    /// <summary>Typed in Admin settings for this session only.</summary>
     ItProvidedThisSession,
 
-    /// <summary>Saved by IT on this computer, encrypted for the Windows user.</summary>
+    /// <summary>Saved in Admin settings on this computer, encrypted for the Windows user.</summary>
     ItSavedOnThisComputer,
 }
 
@@ -60,7 +60,7 @@ public sealed record InteractiveStep(string Send, Regex Expect);
 
 public sealed record InteractiveResult(bool Completed, string Transcript, int StepsCompleted);
 
-public interface ISshSession : IAsyncDisposable
+public interface ISshSession : IDisposable
 {
     string? HostKeyAlgorithm { get; }
 

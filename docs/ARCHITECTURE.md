@@ -1,5 +1,14 @@
 # Architecture and technical risks
 
+## Version 2 in one paragraph
+
+`AssistantHost` wires together a `DeviceInventory` (one record per MAC address), a `NetworkMonitor`
+(discovery broadcast, ARP sweep, controller check, and read-only checks on access points that are due),
+a `BatchRunner` (concurrency, re-validation, retries, cancellation) and a `DeviceAdopter` (the
+per-device steps, shared by every path). The `Classifier` turns the facts about each access point into
+one of six plain-language groups. The window only reads the inventory's snapshots on a timer and
+starts batches.
+
 ## Shape
 
 ```

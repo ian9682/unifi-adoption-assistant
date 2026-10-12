@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Text.Json;
+using UniFiAdoption.Core.Json;
 using UniFiAdoption.Core.Device;
 using UniFiAdoption.Core.Networking;
 
@@ -36,10 +36,10 @@ public sealed class AssistantSettings
     public bool RequireUbiquitiIdentity { get; set; } = true;
 
     /// <summary>Additional Ubiquiti OUIs (first 6 hex digits) to accept, added to the built-in list.</summary>
-    public List<string> ExtraUbiquitiOuis { get; set; } = [];
+    public List<string> ExtraUbiquitiOuis { get; set; } = new();
 
     /// <summary>The device's reported model must start with one of these (the AC Pro reports UAP-AC-Pro...).</summary>
-    public List<string> SupportedModelPrefixes { get; set; } = ["UAP"];
+    public List<string> SupportedModelPrefixes { get; set; } = new() { "UAP" };
 
     /// <summary>Use the legacy interactive mca-cli session if mca-cli-op is missing.</summary>
     public bool AllowInteractiveMcaCliFallback { get; set; } = true;
@@ -61,6 +61,27 @@ public sealed class AssistantSettings
 
     public int VerifyPollSeconds { get; set; } = 5;
 
+    /// <summary>How many access points a batch sets up at the same time.</summary>
+    public int BatchConcurrency { get; set; } = 3;
+
+    /// <summary>How long a batch watches each access point after sending the address (the live list keeps checking after that).</summary>
+    public int BatchVerifySeconds { get; set; } = 15;
+
+    /// <summary>How often the live list repeats the discovery broadcast.</summary>
+    public int DiscoveryIntervalSeconds { get; set; } = 30;
+
+    /// <summary>How often the live list repeats the full ARP sweep.</summary>
+    public int ArpSweepIntervalSeconds { get; set; } = 120;
+
+    /// <summary>How often an access point waiting for approval is checked to see whether it has been adopted.</summary>
+    public int RecheckWaitingSeconds { get; set; } = 45;
+
+    /// <summary>An access point not seen for this long is shown as "Not responding".</summary>
+    public int UnreachableAfterSeconds { get; set; } = 300;
+
+    /// <summary>How many access points the live list checks at the same time.</summary>
+    public int CheckConcurrency { get; set; } = 4;
+
     /// <summary>Optional: MAC address → expected SHA256 host-key fingerprint (from the log of a trusted run).</summary>
     public Dictionary<string, string> PinnedHostKeys { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -75,31 +96,38 @@ public sealed class AssistantSettings
     /// Ubiquiti discovery broadcast. IT should confirm against the IEEE registry and use
     /// ExtraUbiquitiOuis for any missing prefix.
     /// </summary>
-    public static IReadOnlyList<string> BuiltInUbiquitiOuis { get; } =
-    [
+    public static IReadOnlyList<string> BuiltInUbiquitiOuis { get; } = new[]
+    {
         "00156D", "002722", "0418D6", "0CEA14", "18E829", "1C6A1B", "245A4C", "24A43C", "28704E",
         "44D9E7", "602232", "687251", "68D79A", "6C63F8", "70A741", "7483C2", "74ACB9", "784558",
         "788A20", "802AA8", "847848", "942A6F", "9C05D6", "AC8BA9", "B4FBE4", "D021F9", "D8B370",
         "DC9FDB", "E063DA", "E43883", "F09FC2", "F492BF", "FCECDA",
-    ];
+    };
 
     public IReadOnlyCollection<string> AllUbiquitiOuis =>
         BuiltInUbiquitiOuis
-            .Concat(ExtraUbiquitiOuis.Select(o => new string(o.Where(char.IsAsciiHexDigit).ToArray()).ToUpperInvariant()))
+            .Concat(ExtraUbiquitiOuis.Select(o => new string(o.Where(Compat.IsHex).ToArray()).ToUpperInvariant()))
             .Where(o => o.Length == 6)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Keeps numbers within sensible bounds instead of failing on a typo.</summary>
     public void Normalize()
     {
-        SshPort = Math.Clamp(SshPort, 1, 65535);
-        DiscoveryListenSeconds = Math.Clamp(DiscoveryListenSeconds, 1, 30);
-        MaxHostsPerInterface = Math.Clamp(MaxHostsPerInterface, 16, 4094);
-        ArpParallelism = Math.Clamp(ArpParallelism, 1, 256);
-        SshConnectTimeoutSeconds = Math.Clamp(SshConnectTimeoutSeconds, 3, 120);
-        SshCommandTimeoutSeconds = Math.Clamp(SshCommandTimeoutSeconds, 3, 300);
-        VerifySeconds = Math.Clamp(VerifySeconds, 0, 600);
-        VerifyPollSeconds = Math.Clamp(VerifyPollSeconds, 1, 60);
+        SshPort = Compat.Clamp(SshPort, 1, 65535);
+        DiscoveryListenSeconds = Compat.Clamp(DiscoveryListenSeconds, 1, 30);
+        MaxHostsPerInterface = Compat.Clamp(MaxHostsPerInterface, 16, 4094);
+        ArpParallelism = Compat.Clamp(ArpParallelism, 1, 256);
+        SshConnectTimeoutSeconds = Compat.Clamp(SshConnectTimeoutSeconds, 3, 120);
+        SshCommandTimeoutSeconds = Compat.Clamp(SshCommandTimeoutSeconds, 3, 300);
+        VerifySeconds = Compat.Clamp(VerifySeconds, 0, 600);
+        VerifyPollSeconds = Compat.Clamp(VerifyPollSeconds, 1, 60);
+        BatchConcurrency = Compat.Clamp(BatchConcurrency, 1, 8);
+        BatchVerifySeconds = Compat.Clamp(BatchVerifySeconds, 0, 300);
+        DiscoveryIntervalSeconds = Compat.Clamp(DiscoveryIntervalSeconds, 5, 600);
+        ArpSweepIntervalSeconds = Compat.Clamp(ArpSweepIntervalSeconds, 30, 3600);
+        RecheckWaitingSeconds = Compat.Clamp(RecheckWaitingSeconds, 10, 3600);
+        UnreachableAfterSeconds = Compat.Clamp(UnreachableAfterSeconds, 60, 3600);
+        CheckConcurrency = Compat.Clamp(CheckConcurrency, 1, 8);
         SupportContact = string.IsNullOrWhiteSpace(SupportContact) ? "the ITO Networks Team" : SupportContact.Trim();
         SupportedModelPrefixes = SupportedModelPrefixes.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList();
     }
@@ -138,7 +166,10 @@ public sealed class AssistantSettings
     }
 }
 
-public sealed record SettingsLoadResult(AssistantSettings Settings, string? SourcePath, IReadOnlyList<string> Problems);
+public sealed record SettingsLoadResult(AssistantSettings Settings, string? SourcePath, IReadOnlyList<string> Problems)
+{
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>
 /// Looks for settings.json next to the program first (so IT can ship a pre-configured copy), then in
@@ -148,18 +179,11 @@ public static class SettingsLoader
 {
     public const string FileName = "settings.json";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    public static IReadOnlyList<string> DefaultCandidatePaths() => new[]
     {
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
-        PropertyNameCaseInsensitive = true,
-    };
-
-    public static IReadOnlyList<string> DefaultCandidatePaths() =>
-    [
         Path.Combine(AppContext.BaseDirectory, FileName),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "UniFiAdoptionAssistant", FileName),
-    ];
+    };
 
     public static SettingsLoadResult Load(IEnumerable<string>? candidatePaths = null)
     {
@@ -170,18 +194,29 @@ public static class SettingsLoader
                 continue;
             }
 
+            var settings = new AssistantSettings();
+            var problems = new List<string>();
+            var warnings = new List<string>();
             try
             {
-                var settings = JsonSerializer.Deserialize<AssistantSettings>(File.ReadAllText(path), JsonOptions) ?? new AssistantSettings();
-                settings.Normalize();
-                return new SettingsLoadResult(settings, path, settings.Validate());
+                if (MiniJson.Parse(File.ReadAllText(path)) is Dictionary<string, object?> json)
+                {
+                    MiniJson.Populate(settings, json, problems, warnings);
+                }
+                else
+                {
+                    problems.Add($"{path} does not contain a JSON object.");
+                }
             }
-            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
             {
-                var fallback = new AssistantSettings();
-                fallback.Normalize();
-                return new SettingsLoadResult(fallback, path, [$"{path} could not be read: {ex.Message}"]);
+                settings = new AssistantSettings();
+                problems.Add($"{path} could not be read: {ex.Message}");
             }
+
+            settings.Normalize();
+            problems.AddRange(settings.Validate());
+            return new SettingsLoadResult(settings, path, problems) { Warnings = warnings };
         }
 
         var defaults = new AssistantSettings();

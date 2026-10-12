@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Platform-neutral engine: discovery, matching, SSH, device commands and the workflow.
-       Windows-only pieces (ARP sweep, DPAPI) are guarded with [SupportedOSPlatform("windows")]
-       so this project builds and its tests run on any OS. -->
+  <!-- Engine: discovery, inventory, checks, SSH, device commands, batches. No UI.
+       Windows-only pieces (ARP sweep, DPAPI) are only called on Windows. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- net48 is what ships (built into Windows 10/11, so the app stays small).
+         net10.0 is built too so the same code is tested on modern .NET. -->
+    <TargetFrameworks>net48;net10.0</TargetFrameworks>
     <RootNamespace>UniFiAdoption.Core</RootNamespace>
   </PropertyGroup>
 

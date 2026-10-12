@@ -1,6 +1,7 @@
 using System.Diagnostics;
+using System.Text;
 using UniFiAdoption.Core.Configuration;
-using UniFiAdoption.Core.Discovery;
+using UniFiAdoption.Core.Inventory;
 using UniFiAdoption.Core.Logging;
 using UniFiAdoption.Core.Networking;
 using UniFiAdoption.Core.Security;
@@ -9,66 +10,88 @@ using UniFiAdoption.Core.Workflow;
 
 namespace UniFiAdoption.App;
 
+/// <summary>
+/// Version 2 main screen: the list fills itself in, access points are grouped in plain language,
+/// ready ones are ticked automatically, and one button sets up everything that is ticked.
+/// </summary>
 internal sealed class MainForm : Form
 {
-    private const int BadgeColumn = 40; // step badge (26) plus its right margin
-
     private readonly SettingsLoadResult _load;
     private readonly AssistantSettings _settings;
-    private readonly DiagnosticLog _log = DiagnosticLog.CreateDefault();
-    private readonly JsonHostKeyStore _hostKeys;
-    private readonly DpapiCredentialStore _credentials = new();
+    private readonly AssistantHost _host;
+    private readonly ICredentialStore _credentials;
+    private readonly IHostKeyStore _hostKeys;
+    private readonly DiagnosticLog _log;
 
     private readonly BrandBar _brandBar = new();
     private readonly HeroPanel _hero = new();
     private readonly Panel _scroller = new();
     private readonly TableLayoutPanel _root = new();
-    private readonly TableLayoutPanel _card = new();
-    private readonly AccessPointIllustration _illustration = new();
-    private readonly TextBox _suffixBox = new();
-    private readonly Label _inputHint;
-    private readonly PrimaryButton _runButton = new();
-    private readonly PrimaryButton _stopButton = new();
-    private readonly ProgressBar _progress = new();
-    private readonly Label _statusLabel;
+    private readonly Label _statusDot = new();
+    private readonly Label _statusText;
+    private readonly Label _controllerText;
     private readonly Label _testBanner;
     private readonly Label _settingsBanner;
-    private readonly TableLayoutPanel _resultPanel = new();
-    private readonly Label _resultTitle;
-    private readonly Label _resultMessage;
-    private readonly Label _resultSteps;
-    private readonly Label _resultDetails;
+    private readonly TableLayoutPanel _findCard = new();
+    private readonly AccessPointIllustration _illustration = new();
+    private readonly TextBox _findBox = new();
+    private readonly Label _findHint;
+    private readonly TableLayoutPanel _list = new();
+    private readonly TableLayoutPanel _summary = new();
+    private readonly Label _summaryTitle;
+    private readonly Label _summaryText;
+    private readonly PrimaryButton _handOffButton = new();
+    private readonly PrimaryButton _retryButton = new();
+    private readonly LinkLabel _saveReportLink = new();
+    private readonly Label _helpText;
     private readonly Label _footerNote;
-    private readonly LinkLabel _itSettingsLink = new();
+    private readonly LinkLabel _adminLink = new();
+    private readonly BrandBar _actionBar = new();
+    private readonly Label _selectionText = new();
+    private readonly PrimaryButton _runButton = new();
+    private readonly PrimaryButton _stopButton = new();
+    private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 400 };
 
-    // Labels whose wrap width follows the window width, grouped by where they sit.
-    private readonly List<Label> _fullWidthLabels = [];
-    private readonly List<Label> _heroLabels = [];
-    private readonly List<Label> _stepLabels = [];
-    private readonly List<Label> _cardLabels = [];
-    private readonly List<Label> _resultLabels = [];
+    private readonly List<Label> _fullWidthLabels = new();
+    private readonly List<Label> _heroLabels = new();
+    private readonly List<Label> _findLabels = new();
+    private readonly List<Label> _summaryLabels = new();
+    private readonly Dictionary<MacAddress, DeviceRow> _rows = new();
+    private readonly HashSet<MacAddress> _selected = new();
+    private readonly HashSet<MacAddress> _offeredForSelection = new();
 
     private SshCredential? _sessionCredential;
     private bool _testMode;
-    private CancellationTokenSource? _cts;
-    private AdoptionReport? _lastReport;
-    private Color _resultAccent = Theme.Brand;
+    private bool _showAdopted;
+    private int _shownVersion = -1;
+    private string _shownFilter = string.Empty;
+    private CancellationTokenSource? _batchCts;
+    private List<MacAddress>? _batchMacs;
+    private BatchResult? _lastBatch;
+    private bool _lastBatchWasTest;
+    private Color _summaryAccent = Theme.Brand;
 
-    public MainForm(SettingsLoadResult load, bool forceTestMode)
+    /// <summary>Test seam: answers the confirmation automatically in UI checks. Null in the real app.</summary>
+    internal static Func<string, bool>? ConfirmOverride { get; set; }
+
+    public MainForm(SettingsLoadResult load, AssistantHost host, ICredentialStore credentials, IHostKeyStore hostKeys, bool forceTestMode)
     {
         _load = load;
         _settings = load.Settings;
+        _host = host;
+        _credentials = credentials;
+        _hostKeys = hostKeys;
+        _log = host.Log;
         _testMode = _settings.TestMode || forceTestMode;
-        _hostKeys = new JsonHostKeyStore(JsonHostKeyStore.DefaultPath, _settings.PinnedHostKeys);
 
-        _inputHint = Wrap(_cardLabels, "Example: if the label says 802AA812ABCD, type ABCD.", Theme.Small, Theme.Muted, new Padding(0, 6, 0, 16));
-        _statusLabel = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.Muted, new Padding(0, 2, 0, 8));
-        _testBanner = Wrap(_fullWidthLabels, "Test mode is on. The assistant will find and check the access point but will not change anything.", Theme.Body, Color.FromArgb(0x5C, 0x44, 0x00), new Padding(0, 0, 0, 14));
-        _settingsBanner = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.ErrorText, new Padding(0, 0, 0, 14));
-        _resultTitle = Wrap(_resultLabels, string.Empty, Theme.ResultTitle, Theme.Ink, new Padding(0, 0, 0, 6));
-        _resultMessage = Wrap(_resultLabels, string.Empty, Theme.Body, Theme.Ink, new Padding(0, 0, 0, 6));
-        _resultSteps = Wrap(_resultLabels, string.Empty, Theme.Body, Theme.Ink, new Padding(0, 2, 0, 4));
-        _resultDetails = Wrap(_resultLabels, string.Empty, Theme.Mono, Theme.Muted, new Padding(0, 6, 0, 0));
+        _statusText = Wrap(_fullWidthLabels, "Starting…", Theme.Body, Theme.Ink, Padding.Empty);
+        _controllerText = new Label { AutoSize = true, Font = Theme.Small, ForeColor = Theme.Muted, Margin = new Padding(0, 3, 0, 0), UseMnemonic = false };
+        _testBanner = Wrap(_fullWidthLabels, "Test mode is on. Access points are checked, but nothing is changed.", Theme.Body, Color.FromArgb(0x5C, 0x44, 0x00), new Padding(0, 0, 0, 12));
+        _settingsBanner = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.ErrorText, new Padding(0, 0, 0, 12));
+        _findHint = Wrap(_findLabels, "Type the last 4 characters printed after “MAC” on the label.", Theme.Small, Theme.Muted, new Padding(0, 6, 0, 0));
+        _summaryTitle = Wrap(_summaryLabels, string.Empty, Theme.ResultTitle, Theme.Ink, new Padding(0, 0, 0, 6));
+        _summaryText = Wrap(_summaryLabels, string.Empty, Theme.Body, Theme.Ink, new Padding(0, 0, 0, 10));
+        _helpText = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.Ink, Padding.Empty);
         _footerNote = Wrap(_fullWidthLabels, string.Empty, Theme.Small, Theme.Muted, new Padding(0, 4, 0, 0));
 
         SuspendLayout();
@@ -79,8 +102,8 @@ internal sealed class MainForm : Form
         BackColor = Color.White;
         ForeColor = Theme.Ink;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(900, 820);
-        MinimumSize = new Size(720, 540);
+        ClientSize = new Size(940, 860);
+        MinimumSize = new Size(760, 600);
         try
         {
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -94,18 +117,22 @@ internal sealed class MainForm : Form
         LoadDevicePhoto();
         ResumeLayout(performLayout: true);
 
+        _uiTimer.Tick += (_, _) => RefreshView();
         _log.Info($"Assistant {AdoptionReport.AssistantVersion} started. Settings: {_load.SourcePath ?? "built-in defaults"}.");
         foreach (var problem in _load.Problems)
         {
             _log.Error($"Settings problem: {problem}");
+        }
+
+        foreach (var warning in _load.Warnings)
+        {
+            _log.Warn($"Settings: {warning}");
         }
     }
 
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-
-        // Fit smaller screens (for example 1366x768 laptops at 125% scaling).
         var area = Screen.FromControl(this).WorkingArea;
         if (Height > area.Height)
         {
@@ -113,16 +140,19 @@ internal sealed class MainForm : Form
             Top = area.Top;
         }
 
-        UpdateWrapWidths();
         UpdateBanners();
-        _suffixBox.Focus();
+        UpdateWrapWidths();
+        _host.Monitor.Start();
+        _uiTimer.Start();
+        RefreshView();
+        _findBox.Focus();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (_cts is not null)
+        if (_batchCts is not null)
         {
-            var answer = MessageBox.Show(this, "The setup is still running. Stop it and close the assistant?",
+            var answer = MessageBox.Show(this, "Access points are still being set up. Stop and close the assistant?",
                 Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (answer != DialogResult.Yes)
             {
@@ -130,19 +160,22 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            _cts.Cancel();
+            _batchCts.Cancel();
         }
 
+        _uiTimer.Stop();
         base.OnFormClosing(e);
     }
+
+    // ----------------------------------------------------------------------------------- layout
 
     private void BuildLayout()
     {
         _scroller.Dock = DockStyle.Fill;
         _scroller.AutoScroll = true;
-        _scroller.Padding = new Padding(32, 24, 32, 20);
+        _scroller.Padding = new Padding(32, 20, 32, 20);
         _scroller.BackColor = Color.White;
-        _scroller.Resize += (_, _) => UpdateWrapWidths(); // also fires when the window moves to a screen with different scaling
+        _scroller.Resize += (_, _) => UpdateWrapWidths();
 
         _root.Dock = DockStyle.Top;
         _root.AutoSize = true;
@@ -151,39 +184,37 @@ internal sealed class MainForm : Form
         _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _root.BackColor = Color.White;
 
+        _root.Controls.Add(BuildStatusStrip());
+
         _testBanner.BackColor = Color.FromArgb(0xFF, 0xF1, 0xB8);
         _testBanner.Padding = new Padding(12, 9, 12, 9);
         _root.Controls.Add(_testBanner);
-
         _settingsBanner.BackColor = Color.FromArgb(0xFD, 0xEC, 0xEA);
         _settingsBanner.Padding = new Padding(12, 9, 12, 9);
         _root.Controls.Add(_settingsBanner);
 
-        _root.Controls.Add(BuildMainRow());
+        _root.Controls.Add(BuildFindCard());
+        _root.Controls.Add(BuildSummary());
 
-        _progress.Style = ProgressBarStyle.Continuous;
-        _progress.Minimum = 0;
-        _progress.Maximum = 100;
-        _progress.Height = 10;
-        _progress.Dock = DockStyle.Fill;
-        _progress.Margin = new Padding(0, 4, 0, 4);
-        _progress.Visible = false;
-        _root.Controls.Add(_progress);
-        _statusLabel.Visible = false;
-        _root.Controls.Add(_statusLabel);
+        _list.ColumnCount = 1;
+        _list.AutoSize = true;
+        _list.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _list.Dock = DockStyle.Fill;
+        _list.Margin = new Padding(0, 4, 0, 16);
+        _list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _root.Controls.Add(_list);
 
-        _root.Controls.Add(BuildResultPanel());
-        _root.Controls.Add(BuildHelpSection());
+        _root.Controls.Add(BuildHelp());
         _root.Controls.Add(BuildFooter());
         _root.Controls.Add(_footerNote);
         _scroller.Controls.Add(_root);
 
-        // Docking order: the control added last takes the outermost edge, so the brand bar sits on
-        // top, the green hero band under it, and the scrolling content fills the rest.
+        // The control added last takes the outermost edge: brand bar on top, then the hero band,
+        // the action bar at the bottom, and the scrolling list fills the rest.
         Controls.Add(_scroller);
+        Controls.Add(BuildActionBar());
         Controls.Add(BuildHero());
         Controls.Add(BuildBrandBar());
-        AcceptButton = _runButton;
     }
 
     private BrandBar BuildBrandBar()
@@ -192,33 +223,16 @@ internal sealed class MainForm : Form
         _brandBar.AutoSize = true;
         _brandBar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         _brandBar.ColumnCount = 2;
-        _brandBar.RowCount = 1;
         _brandBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _brandBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _brandBar.Padding = new Padding(30, 12, 32, 12);
 
         Control logo = BrandAssets.Logo is { } image
-            ? new PictureBox
-            {
-                Image = image,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Size = new Size(200, 50),
-                Margin = Padding.Empty,
-                BackColor = Color.White,
-                AccessibleName = Theme.Organization,
-            }
+            ? new PictureBox { Image = image, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(200, 50), Margin = Padding.Empty, BackColor = Color.White, AccessibleName = Theme.Organization }
             : new Label { Text = Theme.Organization, Font = Theme.Title, ForeColor = Theme.Brand, AutoSize = true, Margin = Padding.Empty };
         _brandBar.Controls.Add(logo, 0, 0);
 
-        var team = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.Right,
-            Margin = Padding.Empty,
-            BackColor = Color.White,
-        };
+        var team = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Right, Margin = Padding.Empty, BackColor = Color.White };
         team.Controls.Add(new Label { Text = Theme.Team, Font = Theme.TeamName, ForeColor = Theme.Brand, AutoSize = true, Anchor = AnchorStyles.Right, Margin = Padding.Empty, UseMnemonic = false });
         team.Controls.Add(new Label { Text = Theme.Motto, Font = Theme.MottoFont, ForeColor = Theme.Muted, AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0), UseMnemonic = false });
         _brandBar.Controls.Add(team, 1, 0);
@@ -232,12 +246,11 @@ internal sealed class MainForm : Form
         _hero.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         _hero.ColumnCount = 1;
         _hero.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        _hero.Padding = new Padding(32, 22, 32, 24);
-
-        var title = Wrap(_heroLabels, "Connect a UniFi access point", Theme.Title, Theme.OnBrand, new Padding(0, 0, 0, 6));
+        _hero.Padding = new Padding(32, 18, 32, 20);
+        var title = Wrap(_heroLabels, "Set up UniFi access points", Theme.Title, Theme.OnBrand, new Padding(0, 0, 0, 4));
         var subtitle = Wrap(_heroLabels,
-            $"Points the access point at your site to {Theme.Organization}'s centralized UniFi controller, so the {Theme.Team.Replace(" ", "\u00A0")} can manage it remotely.",
-            Theme.Body, Theme.OnBrandSubtle, new Padding(0));
+            $"Access points on this network appear below by themselves. Tick the ones to set up and they will be connected to {Theme.Organization}'s central controller.",
+            Theme.Body, Theme.OnBrandSubtle, Padding.Empty);
         title.BackColor = Color.Transparent;
         subtitle.BackColor = Color.Transparent;
         _hero.Controls.Add(title);
@@ -245,376 +258,663 @@ internal sealed class MainForm : Form
         return _hero;
     }
 
-    private TableLayoutPanel BuildMainRow()
+    private TableLayoutPanel BuildStatusStrip()
     {
-        var main = new TableLayoutPanel
+        var strip = new TableLayoutPanel { ColumnCount = 3, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 14) };
+        strip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        strip.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        strip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _statusDot.Text = "●";
+        _statusDot.AutoSize = true;
+        _statusDot.ForeColor = Theme.Brand;
+        _statusDot.Margin = new Padding(0, 0, 6, 0);
+        strip.Controls.Add(_statusDot, 0, 0);
+        var texts = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+        texts.Controls.Add(_statusText);
+        texts.Controls.Add(_controllerText);
+        strip.Controls.Add(texts, 1, 0);
+        var refresh = new LinkLabel { Text = "Search again", AutoSize = true, LinkColor = Theme.Brand, ActiveLinkColor = Theme.BrandDeep, Anchor = AnchorStyles.Right | AnchorStyles.Top, Margin = Padding.Empty };
+        refresh.LinkClicked += (_, _) =>
         {
-            ColumnCount = 2,
-            RowCount = 1,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Fill,
-            Margin = new Padding(0, 0, 0, 14),
+            _host.Monitor.Refresh();
+            _statusText.Text = "Searching…";
         };
-        main.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-        _illustration.Size = new Size(260, 290);
-        _illustration.Margin = new Padding(0, 0, 32, 0);
-        main.Controls.Add(_illustration, 0, 0);
-
-        var right = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Fill,
-            Margin = Padding.Empty,
-        };
-        right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        right.Controls.Add(BuildSteps());
-        right.Controls.Add(BuildInputCard());
-        main.Controls.Add(right, 1, 0);
-        return main;
+        strip.Controls.Add(refresh, 2, 0);
+        return strip;
     }
 
-    private TableLayoutPanel BuildSteps()
+    private TableLayoutPanel BuildFindCard()
     {
-        string[] steps =
-        [
-            "Connect the access point's cable to the POE port of its power adapter, and the adapter's LAN port to the site's router or switch.",
-            "Wait about 2 minutes, until the light on the access point is on.",
-            "Read the MAC address on the label on the back of the access point.",
-            "Make sure this computer is on the same office network (cable or staff Wi-Fi, not guest Wi-Fi).",
-        ];
+        _findCard.ColumnCount = 2;
+        _findCard.AutoSize = true;
+        _findCard.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _findCard.Dock = DockStyle.Fill;
+        _findCard.BackColor = Theme.BrandTint;
+        _findCard.Padding = new Padding(18, 14, 22, 14);
+        _findCard.Margin = new Padding(0, 0, 0, 14);
+        _findCard.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _findCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-        var list = new TableLayoutPanel
+        _illustration.Size = new Size(130, 140);
+        _illustration.BackColor = Theme.BrandTint;
+        _illustration.Margin = new Padding(0, 0, 20, 0);
+        _findCard.Controls.Add(_illustration, 0, 0);
+
+        var right = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty, BackColor = Theme.BrandTint, Anchor = AnchorStyles.Left };
+        right.Controls.Add(Wrap(_findLabels, "Looking for a specific access point?", Theme.Heading, Theme.Ink, new Padding(0, 0, 0, 2)));
+        right.Controls.Add(Wrap(_findLabels, "Enter the last 4 characters of the MAC address", Theme.Body, Theme.Muted, new Padding(0, 0, 0, 8)));
+        _findBox.Font = Theme.FindInput;
+        _findBox.Width = 150;
+        _findBox.MaxLength = 17;
+        _findBox.CharacterCasing = CharacterCasing.Upper;
+        _findBox.TextAlign = HorizontalAlignment.Center;
+        _findBox.BorderStyle = BorderStyle.FixedSingle;
+        _findBox.Margin = Padding.Empty;
+        _findBox.AccessibleName = "Last 4 characters of the MAC address";
+        _findBox.TextChanged += (_, _) => OnFindChanged();
+        _findBox.KeyDown += (_, e) =>
         {
-            ColumnCount = 2,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Fill,
-            Margin = new Padding(0, 2, 0, 16),
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                _host.Monitor.Refresh();
+                OnFindChanged();
+            }
         };
-        list.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (var i = 0; i < steps.Length; i++)
-        {
-            list.Controls.Add(new StepBadge(i + 1) { Margin = new Padding(0, 0, BadgeColumn - 26, 10) }, 0, i);
-            list.Controls.Add(Wrap(_stepLabels, steps[i], Theme.Body, Theme.Ink, new Padding(0, 3, 0, 10)), 1, i);
-        }
-
-        return list;
+        right.Controls.Add(_findBox);
+        right.Controls.Add(_findHint);
+        _findCard.Controls.Add(right, 1, 0);
+        return _findCard;
     }
 
-    private TableLayoutPanel BuildInputCard()
+    private TableLayoutPanel BuildSummary()
     {
-        _card.ColumnCount = 1;
-        _card.AutoSize = true;
-        _card.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        _card.Dock = DockStyle.Fill;
-        _card.BackColor = Theme.BrandTint;
-        _card.Padding = new Padding(22, 18, 22, 20);
-        _card.Margin = Padding.Empty;
-        _card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-        _card.Controls.Add(Wrap(_cardLabels, "Enter the last 4 characters of the MAC address", Theme.Heading, Theme.Ink, new Padding(0, 0, 0, 8)));
-
-        _suffixBox.Font = Theme.Input;
-        _suffixBox.Width = 170;
-        _suffixBox.MaxLength = 5;
-        _suffixBox.CharacterCasing = CharacterCasing.Upper;
-        _suffixBox.TextAlign = HorizontalAlignment.Center;
-        _suffixBox.BorderStyle = BorderStyle.FixedSingle;
-        _suffixBox.Margin = Padding.Empty;
-        _suffixBox.AccessibleName = "Last 4 characters of the MAC address";
-        _suffixBox.TextChanged += (_, _) => OnSuffixChanged();
-        _card.Controls.Add(_suffixBox);
-        _card.Controls.Add(_inputHint);
-
-        _runButton.Text = "Find and Configure Access Point";
-        _runButton.Font = Theme.Button;
-        _runButton.AutoSize = true;
-        _runButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        _runButton.Padding = new Padding(22, 11, 22, 11);
-        _runButton.Margin = new Padding(0, 0, 10, 0);
-        _runButton.Click += OnRunClicked;
-
-        _stopButton.Text = "Stop";
-        _stopButton.Subdued = true;
-        _stopButton.Font = Theme.Body;
-        _stopButton.AutoSize = true;
-        _stopButton.Padding = new Padding(16, 9, 16, 9);
-        _stopButton.Visible = false;
-        _stopButton.Click += (_, _) =>
+        _summary.ColumnCount = 1;
+        _summary.AutoSize = true;
+        _summary.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _summary.Dock = DockStyle.Fill;
+        _summary.Padding = new Padding(22, 16, 18, 16);
+        _summary.Margin = new Padding(0, 0, 0, 16);
+        _summary.Visible = false;
+        _summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _summary.Controls.Add(_summaryTitle);
+        _summary.Controls.Add(_summaryText);
+        _summary.Paint += (_, e) =>
         {
-            _stopButton.Enabled = false;
-            _statusLabel.Text = "Stopping…";
-            _cts?.Cancel();
+            using var bar = new SolidBrush(_summaryAccent);
+            e.Graphics.FillRectangle(bar, 0, 0, (int)Math.Round(5 * e.Graphics.DpiX / 96f), _summary.Height);
         };
 
-        var buttons = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = Padding.Empty,
-            BackColor = Theme.BrandTint,
-        };
-        buttons.Controls.Add(_runButton);
-        buttons.Controls.Add(_stopButton);
-        _card.Controls.Add(buttons);
-        return _card;
+        var buttons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Margin = Padding.Empty };
+        _handOffButton.Text = $"Copy message for the {Theme.Team}";
+        _handOffButton.Subdued = true;
+        _handOffButton.AutoSize = true;
+        _handOffButton.Padding = new Padding(14, 7, 14, 7);
+        _handOffButton.Margin = new Padding(0, 0, 10, 0);
+        _handOffButton.Click += (_, _) => CopyHandOff();
+        _retryButton.Text = "Try the failed ones again";
+        _retryButton.Subdued = true;
+        _retryButton.AutoSize = true;
+        _retryButton.Padding = new Padding(14, 7, 14, 7);
+        _retryButton.Margin = new Padding(0, 0, 10, 0);
+        _retryButton.Click += (_, _) => RetryFailed();
+        _saveReportLink.Text = "Save report";
+        _saveReportLink.AutoSize = true;
+        _saveReportLink.LinkColor = Theme.Brand;
+        _saveReportLink.Margin = new Padding(4, 9, 0, 0);
+        _saveReportLink.LinkClicked += (_, _) => SaveReport();
+        buttons.Controls.Add(_handOffButton);
+        buttons.Controls.Add(_retryButton);
+        buttons.Controls.Add(_saveReportLink);
+        _summary.Controls.Add(buttons);
+        return _summary;
     }
 
-    private TableLayoutPanel BuildResultPanel()
+    private TableLayoutPanel BuildHelp()
     {
-        _resultPanel.ColumnCount = 1;
-        _resultPanel.AutoSize = true;
-        _resultPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        _resultPanel.Dock = DockStyle.Fill;
-        _resultPanel.Padding = new Padding(22, 16, 18, 18);
-        _resultPanel.Margin = new Padding(0, 8, 0, 18);
-        _resultPanel.Visible = false;
-        _resultPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        _resultPanel.Controls.Add(_resultTitle);
-        _resultPanel.Controls.Add(_resultMessage);
-        _resultPanel.Controls.Add(_resultSteps);
-        _resultPanel.Controls.Add(_resultDetails);
-        _resultPanel.Paint += (_, e) =>
-        {
-            using var bar = new SolidBrush(_resultAccent);
-            e.Graphics.FillRectangle(bar, 0, 0, (int)Math.Round(5 * e.Graphics.DpiX / 96f), _resultPanel.Height);
-        };
-        return _resultPanel;
-    }
-
-    private TableLayoutPanel BuildHelpSection()
-    {
-        var help = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Fill,
-            Margin = new Padding(0, 6, 0, 12),
-        };
+        var help = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 8) };
         help.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        help.Controls.Add(Wrap(_fullWidthLabels, "Troubleshooting", Theme.Heading, Theme.Brand, new Padding(0, 0, 0, 8)));
-        help.Controls.Add(Wrap(_fullWidthLabels, string.Join("\n",
-            "•  No light on the access point: check that its cable is in the POE port of the power adapter and that the adapter has power.",
-            "•  Not found: this computer and the access point must be on the same network segment. Guest or isolated Wi-Fi will not work.",
-            "•  If the access point was only just plugged in, wait 2 minutes and try again.",
-            "•  The MAC address only uses 0 to 9 and A to F, so an O on the label is always the number 0.",
-            "•  Running it again is safe. Only the access point you identify is changed, and only after it has been verified.",
-            "•  Login refused: the access point was set up before. Enter its login under Admin settings, or factory-reset it if agreed with the ITO Networks Team.",
-            $"•  Still stuck? Click “Copy support details” and send them to {_settings.SupportContact}."),
-            Theme.Body, Theme.Ink, new Padding(0)));
+        var toggle = new LinkLabel { Text = "Troubleshooting ▸", AutoSize = true, Font = Theme.Heading, LinkColor = Theme.Brand, ActiveLinkColor = Theme.BrandDeep, LinkBehavior = LinkBehavior.HoverUnderline, Margin = new Padding(0, 0, 0, 6) };
+        _helpText.Text = string.Join("\n",
+            "•  Nothing in the list: check the access point has power (its light is on) and is connected to the same network as this computer. New access points take about 2 minutes to start.",
+            "•  Not responding: check its power and cable, then click “Search again”.",
+            "•  Needs a look: the sentence under the access point says what to do. Clicking “Search again” checks it again.",
+            "•  The MAC address only uses 0 to 9 and A to F, so an O on the label is the number 0.",
+            "•  Setting up again is safe. Only ticked access points are changed, and only after they have been checked.",
+            $"•  Still stuck? Click “Copy support details” and send them to {_settings.SupportContact}.");
+        _helpText.Visible = false;
+        toggle.LinkClicked += (_, _) =>
+        {
+            _helpText.Visible = !_helpText.Visible;
+            toggle.Text = _helpText.Visible ? "Troubleshooting ▾" : "Troubleshooting ▸";
+        };
+        help.Controls.Add(toggle);
+        help.Controls.Add(_helpText);
         return help;
     }
 
     private FlowLayoutPanel BuildFooter()
     {
-        var footer = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = new Padding(0, 8, 0, 0),
-        };
+        var footer = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Margin = new Padding(0, 6, 0, 0) };
 
         LinkLabel Link(string text, Action action)
         {
-            var link = new LinkLabel
-            {
-                Text = text,
-                AutoSize = true,
-                Font = Theme.Body,
-                LinkColor = Theme.Brand,
-                ActiveLinkColor = Theme.BrandDeep,
-                VisitedLinkColor = Theme.Brand,
-                Margin = new Padding(0, 0, 24, 0),
-            };
+            var link = new LinkLabel { Text = text, AutoSize = true, Font = Theme.Body, LinkColor = Theme.Brand, ActiveLinkColor = Theme.BrandDeep, VisitedLinkColor = Theme.Brand, Margin = new Padding(0, 0, 24, 0) };
             link.LinkClicked += (_, _) => action();
             return link;
         }
 
-        footer.Controls.Add(Link("Copy support details", CopyDetails));
+        footer.Controls.Add(Link("Copy support details", CopySupportDetails));
         footer.Controls.Add(Link("Open log folder", OpenLogFolder));
-        _itSettingsLink.Text = "Admin settings";
-        _itSettingsLink.AutoSize = true;
-        _itSettingsLink.Font = Theme.Body;
-        _itSettingsLink.LinkColor = Theme.Brand;
-        _itSettingsLink.ActiveLinkColor = Theme.BrandDeep;
-        _itSettingsLink.Margin = new Padding(0, 0, 24, 0);
-        _itSettingsLink.LinkClicked += (_, _) => OpenItSettings();
-        footer.Controls.Add(_itSettingsLink);
-        footer.Controls.Add(new Label
-        {
-            Text = $"{Theme.Organization} {Theme.Team}  |  Version {AdoptionReport.AssistantVersion}",
-            AutoSize = true,
-            ForeColor = Theme.Muted,
-            Font = Theme.Small,
-            Margin = new Padding(0, 2, 0, 0),
-        });
+        _adminLink.Text = "Admin settings";
+        _adminLink.AutoSize = true;
+        _adminLink.Font = Theme.Body;
+        _adminLink.LinkColor = Theme.Brand;
+        _adminLink.ActiveLinkColor = Theme.BrandDeep;
+        _adminLink.Margin = new Padding(0, 0, 24, 0);
+        _adminLink.LinkClicked += (_, _) => OpenAdminSettings();
+        footer.Controls.Add(_adminLink);
+        footer.Controls.Add(new Label { Text = $"{Theme.Organization} {Theme.Team}  |  Version {AdoptionReport.AssistantVersion}", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Small, Margin = new Padding(0, 2, 0, 0) });
         return footer;
     }
 
-    private void OnSuffixChanged()
+    private BrandBar BuildActionBar()
     {
-        _illustration.Suffix = _suffixBox.Text;
-        _inputHint.ForeColor = Theme.Muted;
-        _inputHint.Text = "Example: if the label says 802AA812ABCD, type ABCD.";
+        _actionBar.Dock = DockStyle.Bottom;
+        _actionBar.AutoSize = true;
+        _actionBar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _actionBar.ColumnCount = 3;
+        _actionBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _actionBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _actionBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _actionBar.Padding = new Padding(32, 12, 32, 12);
+        _actionBar.TopLine = true;
+
+        _selectionText.AutoSize = true;
+        _selectionText.Anchor = AnchorStyles.Left;
+        _selectionText.ForeColor = Theme.Muted;
+        _selectionText.Margin = Padding.Empty;
+        _actionBar.Controls.Add(_selectionText, 0, 0);
+
+        _stopButton.Text = "Stop";
+        _stopButton.Subdued = true;
+        _stopButton.AutoSize = true;
+        _stopButton.Padding = new Padding(16, 9, 16, 9);
+        _stopButton.Margin = new Padding(0, 0, 10, 0);
+        _stopButton.Visible = false;
+        _stopButton.Anchor = AnchorStyles.Right;
+        _stopButton.Click += (_, _) =>
+        {
+            _stopButton.Enabled = false;
+            _batchCts?.Cancel();
+        };
+        _actionBar.Controls.Add(_stopButton, 1, 0);
+
+        _runButton.Text = "Set up access points";
+        _runButton.Font = Theme.Button;
+        _runButton.AutoSize = true;
+        _runButton.Padding = new Padding(24, 11, 24, 11);
+        _runButton.Margin = Padding.Empty;
+        _runButton.Anchor = AnchorStyles.Right;
+        _runButton.Click += async (_, _) => await RunBatchAsync(SelectedReady());
+        _actionBar.Controls.Add(_runButton, 2, 0);
+        return _actionBar;
     }
 
-    private async void OnRunClicked(object? sender, EventArgs e)
+    // ------------------------------------------------------------------------- live updates
+
+    private void RefreshView()
     {
-        if (_cts is not null)
+        var network = _host.Inventory.Network;
+        UpdateStatus(network);
+
+        var filter = MacSuffix.Clean(_findBox.Text);
+        var version = _host.Inventory.Version;
+        if (version == _shownVersion && filter == _shownFilter)
         {
             return;
         }
 
-        var validation = MacSuffix.Validate(_suffixBox.Text);
-        if (!validation.IsValid)
-        {
-            _inputHint.ForeColor = Theme.ErrorText;
-            _inputHint.Text = validation.Problem;
-            _suffixBox.Focus();
-            _suffixBox.SelectAll();
-            return;
-        }
+        _shownVersion = version;
+        _shownFilter = filter;
+        var views = _host.Inventory.Snapshot();
 
-        _cts = new CancellationTokenSource();
-        SetRunning(true);
-        var progress = new Progress<WorkflowProgress>(p =>
+        // Tick newly ready access points once; respect a technician who unticks one.
+        foreach (var view in views.Where(v => v.Status == DeviceStatus.Ready))
         {
-            _progress.Value = Math.Max(_progress.Minimum, Math.Min(_progress.Maximum, p.Percent));
-            if (_stopButton.Enabled)
+            if (_offeredForSelection.Add(view.Mac))
             {
-                _statusLabel.Text = p.Message;
+                _selected.Add(view.Mac);
             }
-        });
+        }
 
-        var request = new AdoptionRequest(_suffixBox.Text, _testMode, _sessionCredential);
-        var workflow = CreateWorkflow();
-        var token = _cts.Token;
+        _selected.RemoveWhere(mac => views.FirstOrDefault(v => v.Mac == mac)?.Status != DeviceStatus.Ready);
+        RebuildList(views, filter, network);
+        UpdateFindHint(views, filter);
+        UpdateSummary(views);
+        UpdateActionBar();
+    }
+
+    private void UpdateStatus(NetworkSnapshot network)
+    {
+        string text;
+        Color dot;
+        if (!network.HasNetwork)
+        {
+            dot = Theme.ErrorText;
+            text = network.SelfAssignedOnly
+                ? "This computer is connected but didn't get a network address. Check the cable and that the router is on."
+                : "This computer isn't connected to a network. Connect it to the same network as the access points.";
+        }
+        else if (network.SearchBlocked)
+        {
+            dot = Theme.ErrorText;
+            text = $"Security settings on this computer are blocking the search. Contact {_settings.SupportContact}.";
+        }
+        else
+        {
+            dot = Theme.Brand;
+            var where = network.AdapterName is null ? "this network" : $"{network.AdapterName} ({network.SubnetText})";
+            text = network.Searching || network.LastSearchCompleted is null
+                ? $"Searching {where}…"
+                : $"Searching {where} automatically. Last checked {network.LastSearchCompleted.Value:HH:mm:ss}.";
+        }
+
+        _statusDot.ForeColor = dot;
+        _statusText.Text = text;
+        _controllerText.Text = network.Controller switch
+        {
+            null => "Checking the central controller…",
+            { PortReachable: true } => "Central controller: reachable from this computer ✓",
+            _ => "Central controller: not reachable from this computer. Check the site's internet connection.",
+        };
+        _controllerText.ForeColor = network.Controller is { PortReachable: false } ? Theme.ErrorText : Theme.Muted;
+    }
+
+    private void RebuildList(IReadOnlyList<DeviceView> views, string filter, NetworkSnapshot network)
+    {
+        var filtering = filter.Length >= 2;
+        var shown = filtering ? views.Where(v => v.Mac.EndsWithHex(filter)).ToList() : views.ToList();
+
+        _list.SuspendLayout();
+        _list.Controls.Clear();
+
+        void Section(string title, IList<DeviceView> items, bool collapsible = false)
+        {
+            if (items.Count == 0)
+            {
+                return;
+            }
+
+            var expanded = !collapsible || _showAdopted || filtering;
+            var header = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 14, 0, 4) };
+            header.Controls.Add(new Label { Text = $"{title} ({items.Count})", AutoSize = true, Font = Theme.Heading, ForeColor = Theme.Ink, Margin = Padding.Empty, UseMnemonic = false });
+            if (collapsible && !filtering)
+            {
+                var toggle = new LinkLabel { Text = _showAdopted ? "Hide" : "Show", AutoSize = true, LinkColor = Theme.Brand, Margin = new Padding(12, 2, 0, 0) };
+                toggle.LinkClicked += (_, _) =>
+                {
+                    _showAdopted = !_showAdopted;
+                    _shownVersion = -1;
+                    RefreshView();
+                };
+                header.Controls.Add(toggle);
+            }
+
+            _list.Controls.Add(header);
+            if (!expanded)
+            {
+                return;
+            }
+
+            foreach (var view in items)
+            {
+                if (!_rows.TryGetValue(view.Mac, out var row))
+                {
+                    row = new DeviceRow { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+                    var mac = view.Mac;
+                    row.Toggled += (_, _) => ToggleSelection(mac);
+                    _rows[view.Mac] = row;
+                }
+
+                row.Bind(view, _selected.Contains(view.Mac), view.Status == DeviceStatus.Ready && _batchCts is null);
+                _list.Controls.Add(row);
+            }
+        }
+
+        Section("Setting up", shown.Where(v => v.Status == DeviceStatus.Working).ToList());
+        Section("Ready to set up", shown.Where(v => v.Status == DeviceStatus.Ready).ToList());
+        Section("Waiting for approval", shown.Where(v => v.Status == DeviceStatus.WaitingForApproval).ToList());
+        Section("Needs a look", shown.Where(v => v.Status is DeviceStatus.NeedsAttention or DeviceStatus.NotResponding).ToList());
+        Section("Checking", shown.Where(v => v.Status == DeviceStatus.Checking).ToList());
+        Section("Already adopted", shown.Where(v => v.Status == DeviceStatus.Adopted).ToList(), collapsible: true);
+
+        if (shown.Count == 0 && !filtering)
+        {
+            var empty = network.Searching || network.LastSearchCompleted is null
+                ? "Searching for access points… They appear here as soon as they are found."
+                : "No UniFi access points found on this network yet. Check that they have power and are connected to the same network as this computer. The list keeps searching by itself.";
+            _list.Controls.Add(Wrap(_fullWidthLabels, empty, Theme.Body, Theme.Muted, new Padding(0, 16, 0, 0)));
+        }
+
+        _list.ResumeLayout(performLayout: true);
+        UpdateWrapWidths();
+    }
+
+    private void UpdateFindHint(IReadOnlyList<DeviceView> views, string filter)
+    {
+        _illustration.Suffix = filter.Length <= 4 ? filter : filter.Substring(filter.Length - 4);
+        if (filter.Length == 0)
+        {
+            _findHint.ForeColor = Theme.Muted;
+            _findHint.Text = "Type the last 4 characters printed after “MAC” on the label.";
+            return;
+        }
+
+        var validation = MacSuffix.Validate(filter.Length <= 4 ? filter : filter.Substring(filter.Length - 4));
+        if (filter.Length >= 4 && !validation.IsValid)
+        {
+            _findHint.ForeColor = Theme.ErrorText;
+            _findHint.Text = validation.Problem;
+            return;
+        }
+
+        if (filter.Length < 4)
+        {
+            _findHint.ForeColor = Theme.Muted;
+            _findHint.Text = "Keep typing…";
+            return;
+        }
+
+        var matches = views.Where(v => v.Mac.EndsWithHex(filter)).ToList();
+        _findHint.ForeColor = matches.Count == 0 ? Theme.ErrorText : Theme.Muted;
+        _findHint.Text = matches.Count switch
+        {
+            0 => $"No access point ending in {Pretty(filter)} found yet. Check its power and cable. The list keeps searching; press Enter to search again now.",
+            1 => $"Found it: {matches[0].FriendlyModel}, {DeviceRow.StatusLabel(matches[0].Status).ToLowerInvariant()}. Only this access point is shown below.",
+            _ => $"{matches.Count} access points end in {Pretty(filter)}. Type 2 more characters from the label to tell them apart.",
+        };
+    }
+
+    private void OnFindChanged()
+    {
+        _shownVersion = -1;
+        RefreshView();
+    }
+
+    private void ToggleSelection(MacAddress mac)
+    {
+        if (!_selected.Remove(mac))
+        {
+            _selected.Add(mac);
+        }
+
+        _shownVersion = -1;
+        RefreshView();
+    }
+
+    private List<MacAddress> SelectedReady() =>
+        _host.Inventory.Snapshot().Where(v => v.Status == DeviceStatus.Ready && _selected.Contains(v.Mac)).Select(v => v.Mac).ToList();
+
+    private void UpdateActionBar()
+    {
+        var count = SelectedReady().Count;
+        var settingsOk = _load.Problems.Count == 0;
+        if (_batchCts is not null && _batchMacs is not null)
+        {
+            var done = _batchMacs.Count(m => _host.Inventory.Get(m)?.Job is JobState.Succeeded or JobState.Failed or JobState.Skipped or JobState.Cancelled);
+            _runButton.Text = $"Setting up… {done} of {_batchMacs.Count}";
+            _runButton.Enabled = false;
+            _selectionText.Text = "Please keep this window open until it finishes.";
+            return;
+        }
+
+        _runButton.Enabled = count > 0 && settingsOk;
+        _runButton.Text = count switch
+        {
+            0 => "Set up access points",
+            1 => _testMode ? "Test 1 access point" : "Set up 1 access point",
+            _ => _testMode ? $"Test {count} access points" : $"Set up {count} access points",
+        };
+        _selectionText.Text = !settingsOk
+            ? $"Setup is turned off because of a settings problem. Contact {_settings.SupportContact}."
+            : count == 0 ? "Tick the access points you want to set up." : $"{count} ticked.";
+    }
+
+    // ------------------------------------------------------------------------------- batches
+
+    private async Task RunBatchAsync(List<MacAddress> macs)
+    {
+        if (macs.Count == 0 || _batchCts is not null)
+        {
+            return;
+        }
+
+        var views = macs.Select(m => _host.Inventory.Get(m)).Where(v => v is not null).Select(v => v!).ToList();
+        var list = string.Join("\n", views.Take(12).Select(v => $"   •  {v.FriendlyModel}   {v.Mac}   ({v.Address})")) +
+                   (views.Count > 12 ? $"\n   …and {views.Count - 12} more" : string.Empty);
+        var question = _testMode
+            ? $"Test {views.Count} access point(s)? Nothing will be changed.\n\n{list}"
+            : $"Set up {views.Count} access point(s)?\n\n{list}\n\nEach one will be connected to {Theme.Organization}'s central controller.";
+        var confirmed = ConfirmOverride?.Invoke(question) ?? MessageBox.Show(this, question, Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) == DialogResult.OK;
+        if (!confirmed)
+        {
+            return;
+        }
+
+        _batchCts = new CancellationTokenSource();
+        _batchMacs = macs;
+        _lastBatchWasTest = _testMode;
+        _stopButton.Visible = true;
+        _stopButton.Enabled = true;
+        _adminLink.Enabled = false;
+        _shownVersion = -1;
+        RefreshView();
         try
         {
-            var report = await Task.Run(() => workflow.RunAsync(request, progress, token));
-            ShowReport(report);
+            _lastBatch = await _host.Batches.RunAsync(macs, _testMode, _sessionCredential, _batchCts.Token);
         }
         catch (Exception ex)
         {
-            // RunAsync reports its own failures; this only guards against something truly unexpected.
-            _log.Error("The run failed outside the workflow.", ex);
-            MessageBox.Show(this, $"Something unexpected went wrong: {ex.Message}\n\nPlease tell {_settings.SupportContact}.",
-                Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _log.Error("Batch failed outside the workflow.", ex);
+            MessageBox.Show(this, $"Something unexpected went wrong: {ex.Message}\n\nPlease tell {_settings.SupportContact}.", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
-            _cts.Dispose();
-            _cts = null;
-            SetRunning(false);
+            _batchCts.Dispose();
+            _batchCts = null;
+            _stopButton.Visible = false;
+            _adminLink.Enabled = true;
+            _selected.ExceptWith(macs);
+            _shownVersion = -1;
+            RefreshView();
+            _scroller.ScrollControlIntoView(_summary);
         }
     }
 
-    private AdoptionWorkflow CreateWorkflow()
+    private void RetryFailed()
     {
-        var dependencies = new WorkflowDependencies(
-            new SystemLocalNetworkProvider(),
-            new UbntDiscoveryScanner(),
-            new WindowsArpScanner(),
-            new NetworkControllerProbe(),
-            new TcpSshBannerProbe(),
-            new SshNetConnector(),
-            _hostKeys,
-            _credentials);
-        return new AdoptionWorkflow(_settings, dependencies, _log);
-    }
-
-    private void SetRunning(bool running)
-    {
-        _runButton.Enabled = !running;
-        _suffixBox.ReadOnly = running;
-        _stopButton.Visible = running;
-        _stopButton.Enabled = running;
-        _progress.Visible = running;
-        _statusLabel.Visible = running;
-        _itSettingsLink.Enabled = !running;
-        if (running)
+        if (_batchMacs is null)
         {
-            _progress.Value = 0;
-            _statusLabel.Text = "Starting…";
-            _resultPanel.Visible = false;
-            _footerNote.Text = string.Empty;
+            return;
         }
+
+        var failed = _batchMacs.Where(m => _host.Inventory.Get(m)?.Job == JobState.Failed).ToList();
+        foreach (var mac in failed)
+        {
+            _selected.Add(mac);
+        }
+
+        _host.Monitor.Refresh(); // re-check them first; they become ready again if nothing is wrong
+        _summaryText.Text = "Checking them again. Ticked access points that are ready can then be set up.";
     }
 
-    private void ShowReport(AdoptionReport report)
+    private void UpdateSummary(IReadOnlyList<DeviceView> views)
     {
-        _lastReport = report;
-        var (back, fore) = Theme.ForTone(report.Tone);
-        _resultAccent = fore;
-        _resultPanel.BackColor = back;
-        _resultTitle.ForeColor = fore;
-        _resultTitle.Text = report.Title;
-        _resultMessage.Text = report.Message;
-        _resultSteps.Text = string.Join("\n", report.NextSteps.Select(s => "•  " + s));
-        _resultSteps.Visible = report.NextSteps.Count > 0;
-
-        var details = new List<string>();
-        if (report.Device is { } device)
+        if (_batchMacs is null || _batchCts is not null || _lastBatch is null)
         {
-            details.Add($"Access point: {device.Mac}  at {device.IpAddress ?? "unknown address"}");
-            if (device.Model is not null || device.Firmware is not null)
+            _summary.Visible = false;
+            return;
+        }
+
+        var batch = _batchMacs.Select(m => views.FirstOrDefault(v => v.Mac == m)).Where(v => v is not null).Select(v => v!).ToList();
+        var adopted = batch.Count(v => v.Status == DeviceStatus.Adopted);
+        var waiting = batch.Count(v => v.Status == DeviceStatus.WaitingForApproval);
+        var failed = batch.Where(v => v.Job == JobState.Failed).ToList();
+        var stopped = batch.Count(v => v.Job == JobState.Cancelled);
+
+        string title;
+        ResultTone tone;
+        var lines = new List<string>();
+        if (_lastBatchWasTest)
+        {
+            tone = ResultTone.Info;
+            title = "Test finished. Nothing was changed.";
+            lines.Add($"{batch.Count(v => v.LastReport?.Outcome == AdoptionOutcome.DryRunCompleted)} of {batch.Count} could be set up.");
+        }
+        else if (batch.Count > 0 && adopted == batch.Count)
+        {
+            tone = ResultTone.Success;
+            title = batch.Count == 1 ? "The access point is adopted" : $"All {batch.Count} access points are adopted";
+            lines.Add("Nothing else needs to be done at this site.");
+        }
+        else
+        {
+            tone = failed.Count > 0 ? ResultTone.Problem : ResultTone.Waiting;
+            title = waiting + adopted > 0
+                ? $"Sent {waiting + adopted} of {batch.Count} to the central controller"
+                : "The access points weren't set up";
+            if (waiting > 0)
             {
-                details.Add($"Model: {device.Model ?? "unknown"}    Firmware: {device.Firmware ?? "unknown"}");
+                lines.Add($"{waiting} waiting for approval. Copy the message below and send it to {_settings.SupportContact}. This list updates by itself when they approve.");
             }
 
-            if (device.StatusText is not null)
+            if (adopted > 0)
             {
-                details.Add($"Status reported by the access point: {device.StatusText}");
+                lines.Add($"{adopted} adopted.");
+            }
+
+            if (stopped > 0)
+            {
+                lines.Add($"{stopped} not started because you clicked Stop.");
+            }
+
+            foreach (var item in failed)
+            {
+                lines.Add($"…{item.Mac.ToString().Substring(12)}: {item.LastReport?.Title ?? "didn't finish"}.");
             }
         }
 
-        if (report.PlannedCommands.Count > 0)
-        {
-            details.Add("A real run would send:");
-            details.AddRange(report.PlannedCommands.Select(c => "  " + c));
-        }
-
-        _resultDetails.Text = string.Join("\n", details);
-        _resultDetails.Visible = details.Count > 0;
-        _resultPanel.Visible = true;
-        _resultPanel.Invalidate();
-        _resultPanel.AccessibleName = $"{report.Title}. {report.Message}";
-        UpdateWrapWidths();
-
-        if (report.Outcome == AdoptionOutcome.InvalidInput)
-        {
-            _inputHint.ForeColor = Theme.ErrorText;
-            _inputHint.Text = report.Message;
-        }
-
-        _scroller.ScrollControlIntoView(_resultPanel);
+        var (back, fore) = Theme.ForTone(tone);
+        _summary.BackColor = back;
+        _summaryAccent = fore;
+        _summaryTitle.ForeColor = fore;
+        _summaryTitle.Text = title;
+        _summaryText.Text = string.Join("\n", lines);
+        _handOffButton.Visible = waiting > 0 && !_lastBatchWasTest;
+        _retryButton.Visible = failed.Count > 0;
+        _summary.Visible = true;
+        _summary.Invalidate();
     }
 
-    private void CopyDetails()
+    private void CopyHandOff()
     {
-        var snapshot = _log.Snapshot();
-        var recentLog = snapshot.Skip(Math.Max(0, snapshot.Count - 120));
-        var text = (_lastReport?.ToSupportText(_log.FilePath) ?? $"UniFi Adoption Assistant {AdoptionReport.AssistantVersion}\nNo setup has been run yet.\n") +
-                   "\nRecent log:\n" + string.Join(Environment.NewLine, recentLog);
+        var waiting = _host.Inventory.Snapshot().Where(v => v.Status == DeviceStatus.WaitingForApproval).ToList();
+        if (waiting.Count == 0)
+        {
+            return;
+        }
+
+        if (TrySetClipboard(HandOff.Compose(waiting, _settings.SupportContact)))
+        {
+            _footerNote.Text = $"Message copied. Paste it into Teams or an email to {_settings.SupportContact}.";
+        }
+    }
+
+    private void SaveReport()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Save report",
+            Filter = "Text file (*.txt)|*.txt",
+            FileName = $"AP-setup-{DateTime.Now:yyyyMMdd-HHmm}.txt",
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var text = new StringBuilder();
+        text.AppendLine($"UniFi Adoption Assistant {AdoptionReport.AssistantVersion} – {Theme.Organization} {Theme.Team}");
+        text.AppendLine($"Computer: {Environment.MachineName}   Saved: {DateTime.Now:yyyy-MM-dd HH:mm}");
+        text.AppendLine();
+        foreach (var view in _host.Inventory.Snapshot().OrderBy(v => v.Status))
+        {
+            text.AppendLine($"{DeviceRow.StatusLabel(view.Status),-22} {view.FriendlyModel,-20} {view.Mac}  {view.Address}  {view.Reason}");
+        }
+
+        if (_lastBatch is not null)
+        {
+            text.AppendLine();
+            text.AppendLine("Last setup run:");
+            foreach (var item in _lastBatch.Items)
+            {
+                text.AppendLine();
+                text.AppendLine(item.Report.ToSupportText(null));
+            }
+        }
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, text.ToString(), Encoding.UTF8);
+            _footerNote.Text = $"Report saved to {dialog.FileName}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, $"The report could not be saved: {ex.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    // --------------------------------------------------------------------------------- misc
+
+    private void CopySupportDetails()
+    {
+        var text = new StringBuilder();
+        text.AppendLine($"UniFi Adoption Assistant {AdoptionReport.AssistantVersion}");
+        text.AppendLine($"Computer: {Environment.MachineName}   Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        var network = _host.Inventory.Network;
+        text.AppendLine($"Network: {network.AdapterName} {network.SubnetText}   Controller reachable: {network.Controller?.PortReachable.ToString() ?? "unknown"}");
+        text.AppendLine();
+        foreach (var view in _host.Inventory.Snapshot())
+        {
+            text.AppendLine($"{view.Mac}  {view.Address}  {view.Model ?? "?"}  {view.Firmware ?? "?"}  {view.Status}: {view.Reason}");
+        }
+
+        var log = _log.Snapshot();
+        text.AppendLine();
+        text.AppendLine("Recent log:");
+        foreach (var line in log.Skip(Math.Max(0, log.Count - 150)))
+        {
+            text.AppendLine(line);
+        }
+
+        if (TrySetClipboard(text.ToString()))
+        {
+            _footerNote.Text = $"Details copied. Paste them into an email or chat message to {_settings.SupportContact}.";
+        }
+    }
+
+    private bool TrySetClipboard(string text)
+    {
         try
         {
             Clipboard.SetText(text);
-            _footerNote.Text = $"Details copied. Paste them into an email or chat message to {_settings.SupportContact}.";
+            return true;
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
             _footerNote.Text = "The clipboard is busy. Please try again.";
+            return false;
         }
     }
 
@@ -623,8 +923,6 @@ internal sealed class MainForm : Form
         try
         {
             Directory.CreateDirectory(DiagnosticLog.DefaultDirectory);
-
-            // Opens the folder in File Explorer. No command line is built from any input.
             Process.Start(new ProcessStartInfo { FileName = DiagnosticLog.DefaultDirectory, UseShellExecute = true });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -633,7 +931,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void OpenItSettings()
+    private void OpenAdminSettings()
     {
         using var dialog = new ItSettingsForm(_settings, _load.SourcePath, _credentials, _hostKeys, _sessionCredential, _testMode);
         dialog.ShowDialog(this);
@@ -641,6 +939,7 @@ internal sealed class MainForm : Form
         _testMode = dialog.TestMode;
         _log.Info($"Admin settings closed. Test mode: {_testMode}. Session login set: {_sessionCredential is not null}.");
         UpdateBanners();
+        UpdateActionBar();
     }
 
     private void UpdateBanners()
@@ -658,12 +957,9 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var path = Path.IsPathRooted(_settings.DeviceImagePath)
-            ? _settings.DeviceImagePath
-            : Path.Combine(AppContext.BaseDirectory, _settings.DeviceImagePath);
+        var path = Path.IsPathRooted(_settings.DeviceImagePath) ? _settings.DeviceImagePath! : Path.Combine(AppContext.BaseDirectory, _settings.DeviceImagePath!);
         try
         {
-            // Read into memory so the file is not locked while the assistant runs.
             _illustration.Photo = Image.FromStream(new MemoryStream(File.ReadAllBytes(path)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -672,7 +968,9 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>Sets each label's maximum width so long text wraps to the window width.</summary>
+    private static string Pretty(string hex) =>
+        string.Join(":", Enumerable.Range(0, hex.Length / 2).Select(i => hex.Substring(i * 2, 2))) + (hex.Length % 2 == 1 ? ":" + hex.Substring(hex.Length - 1) : string.Empty);
+
     /// <summary>Sets each label's maximum width so long text wraps to the window width.</summary>
     private void UpdateWrapWidths()
     {
@@ -682,19 +980,16 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // Keep hero text clear of the leaf on the right.
-        var hero = (int)((ClientSize.Width - _hero.Padding.Horizontal) * 0.8);
-        SetWidths(_heroLabels, hero);
+        SetWidths(_heroLabels, (int)((ClientSize.Width - _hero.Padding.Horizontal) * 0.8));
         SetWidths(_fullWidthLabels, full);
         foreach (var banner in new[] { _testBanner, _settingsBanner })
         {
             banner.MinimumSize = new Size(banner.MaximumSize.Width, 0);
         }
 
-        var right = full - _illustration.Width - _illustration.Margin.Horizontal;
-        SetWidths(_stepLabels, right - LogicalToDeviceUnitsSafe(BadgeColumn));
-        SetWidths(_cardLabels, right - _card.Padding.Horizontal);
-        SetWidths(_resultLabels, full - _resultPanel.Padding.Horizontal);
+        SetWidths(_findLabels, full - _findCard.Padding.Horizontal - _illustration.Width - _illustration.Margin.Horizontal);
+        SetWidths(_summaryLabels, full - _summary.Padding.Horizontal);
+        _statusText.MaximumSize = new Size(Math.Max(80, full - 160), 0);
     }
 
     private static void SetWidths(IEnumerable<Label> labels, int width)
@@ -705,23 +1000,9 @@ internal sealed class MainForm : Form
         }
     }
 
-    private int LogicalToDeviceUnitsSafe(int value)
-    {
-        using var g = CreateGraphics();
-        return (int)Math.Round(value * g.DpiX / 96f);
-    }
-
     private static Label Wrap(List<Label> group, string text, Font font, Color color, Padding margin)
     {
-        var label = new Label
-        {
-            Text = text,
-            Font = font,
-            ForeColor = color,
-            AutoSize = true,
-            Margin = margin,
-            UseMnemonic = false,
-        };
+        var label = new Label { Text = text, Font = font, ForeColor = color, AutoSize = true, Margin = margin, UseMnemonic = false };
         group.Add(label);
         return label;
     }

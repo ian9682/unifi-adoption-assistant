@@ -9,6 +9,9 @@ public enum AdoptionOutcome
     // The device reports it is connected to the configured controller.
     Connected,
 
+    // SSH is open but the factory password is refused: by the team's rule, the controller has adopted it.
+    AlreadyAdopted,
+
     // set-inform was accepted and the device points at the controller; IT must still approve it.
     PendingAdoption,
 
@@ -82,25 +85,25 @@ public sealed record AdoptionReport(
     public string ToSupportText(string? logFilePath)
     {
         var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"UniFi Adoption Assistant {AssistantVersion}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"Time: {FinishedAt:yyyy-MM-dd HH:mm:ss zzz}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"Computer: {Environment.MachineName}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"Result: {Outcome} – {Title}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"Characters entered: {EnteredSuffix ?? "(none)"}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"Access point changed: {(DeviceWasChanged ? "yes" : "no")}");
+        text.AppendLine($"UniFi Adoption Assistant {AssistantVersion}");
+        text.AppendLine($"Time: {FinishedAt:yyyy-MM-dd HH:mm:ss zzz}");
+        text.AppendLine($"Computer: {Environment.MachineName}");
+        text.AppendLine($"Result: {Outcome} – {Title}");
+        text.AppendLine($"Characters entered: {EnteredSuffix ?? "(none)"}");
+        text.AppendLine($"Access point changed: {(DeviceWasChanged ? "yes" : "no")}");
         if (Device is not null)
         {
-            text.AppendLine(CultureInfo.InvariantCulture, $"Device MAC: {Device.Mac}");
-            text.AppendLine(CultureInfo.InvariantCulture, $"Device IP: {Device.IpAddress ?? "unknown"}");
-            text.AppendLine(CultureInfo.InvariantCulture, $"Model: {Device.Model ?? "unknown"}   Firmware: {Device.Firmware ?? "unknown"}");
+            text.AppendLine($"Device MAC: {Device.Mac}");
+            text.AppendLine($"Device IP: {Device.IpAddress ?? "unknown"}");
+            text.AppendLine($"Model: {Device.Model ?? "unknown"}   Firmware: {Device.Firmware ?? "unknown"}");
             if (Device.StatusText is not null)
             {
-                text.AppendLine(CultureInfo.InvariantCulture, $"Device status: {Device.StatusText} ({Device.StatusUrl ?? "no URL"})");
+                text.AppendLine($"Device status: {Device.StatusText} ({Device.StatusUrl ?? "no URL"})");
             }
 
             if (Device.LoginUsed is not null)
             {
-                text.AppendLine(CultureInfo.InvariantCulture, $"Login used: {Device.LoginUsed}");
+                text.AppendLine($"Login used: {Device.LoginUsed}");
             }
         }
 
@@ -124,10 +127,25 @@ public sealed record AdoptionReport(
 
         if (logFilePath is not null)
         {
-            text.AppendLine(CultureInfo.InvariantCulture, $"Log file: {logFilePath}");
+            text.AppendLine($"Log file: {logFilePath}");
         }
 
         return text.ToString();
+    }
+}
+
+/// <summary>Turns what was learned during a run into the user-facing report.</summary>
+internal static class ReportBuilder
+{
+    public static AdoptionReport Build(UniFiAdoption.Core.Configuration.AssistantSettings settings, RunState run, AdoptionOutcome outcome, string? detail, UniFiAdoption.Core.Logging.DiagnosticLog log)
+    {
+        var (tone, title, message, steps) = UserMessages.For(outcome, run, settings.SupportContact, detail);
+        var report = new AdoptionReport(
+            outcome, tone, title, message, steps, run.DeviceChanged, run.Suffix, run.ToDeviceSummary(),
+            outcome == AdoptionOutcome.DryRunCompleted ? run.Planned.ToList() : new List<string>(),
+            run.Notes.ToList(), DateTimeOffset.Now);
+        log.Info($"--- Finished {run.Mac ?? run.Suffix ?? "run"}: {outcome}. Device changed: {run.DeviceChanged}.");
+        return report;
     }
 }
 
@@ -196,6 +214,11 @@ internal static class UserMessages
                     : (ResultTone.Success, "Already connected",
                         "This access point already reports that it is connected to the controller, so nothing was changed.",
                         []);
+
+            case AdoptionOutcome.AlreadyAdopted:
+                return (ResultTone.Success, "Already adopted",
+                    "This access point no longer accepts the factory password, which means it has already been adopted. Nothing was changed.",
+                    new List<string>());
 
             case AdoptionOutcome.PendingAdoption:
                 return (ResultTone.Waiting, $"Done here – waiting for approval",

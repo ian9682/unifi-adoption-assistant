@@ -1,3 +1,4 @@
+using UniFiAdoption.Core.Inventory;
 using UniFiAdoption.Core.Workflow;
 
 namespace UniFiAdoption.App;
@@ -27,6 +28,7 @@ internal static class Theme
     public static readonly Color Muted = Color.FromArgb(0x56, 0x66, 0x61);
     public static readonly Color Disabled = Color.FromArgb(0xB9, 0xCB, 0xC4);
     public static readonly Color Line = Color.FromArgb(0xD8, 0xE2, 0xDE);
+    public static readonly Color RowHover = Color.FromArgb(0xF5, 0xFA, 0xF8);
     public static readonly Color Marker = Color.FromArgb(0xF2, 0xC1, 0x4E);
     public static readonly Color ErrorText = Color.FromArgb(0x9B, 0x2C, 0x24);
 
@@ -45,6 +47,20 @@ internal static class Theme
     public static readonly Font Button = new("Segoe UI Semibold", 11.5f);
     public static readonly Font Input = new("Consolas", 24f, FontStyle.Bold);
     public static readonly Font Mono = new("Consolas", 9.5f);
+    public static readonly Font FindInput = new("Consolas", 18f, FontStyle.Bold);
+    public static readonly Font RowTitle = new("Segoe UI Semibold", 10.5f);
+    public static readonly Font RowMac = new("Consolas", 10f);
+    public static readonly Font Pill = new("Segoe UI Semibold", 9f);
+
+    public static (Color Back, Color Fore) ForStatus(DeviceStatus status) => status switch
+    {
+        DeviceStatus.Ready => (BrandTint, BrandDeep),
+        DeviceStatus.Working => (Brand, Color.White),
+        DeviceStatus.WaitingForApproval => (Color.FromArgb(0xFF, 0xF1, 0xCC), Color.FromArgb(0x7A, 0x53, 0x00)),
+        DeviceStatus.Adopted => (Color.FromArgb(0xE3, 0xF3, 0xE8), Color.FromArgb(0x1B, 0x6B, 0x3A)),
+        DeviceStatus.NeedsAttention => (Color.FromArgb(0xFD, 0xEC, 0xEA), ErrorText),
+        _ => (Color.FromArgb(0xEE, 0xF1, 0xF0), Muted),
+    };
 
     public static (Color Back, Color Fore) ForTone(ResultTone tone) => tone switch
     {

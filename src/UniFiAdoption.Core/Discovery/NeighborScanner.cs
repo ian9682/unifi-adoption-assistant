@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using UniFiAdoption.Core.Networking;
 
 namespace UniFiAdoption.Core.Discovery;
@@ -27,7 +26,7 @@ public sealed class NullNeighborScanner : INeighborScanner
     public Task<NeighborScanResult> ScanAsync(
         IReadOnlyList<LocalInterfaceInfo> interfaces, int maxHostsPerInterface, int parallelism,
         IProgress<double>? progress, CancellationToken cancellationToken) =>
-        Task.FromResult(new NeighborScanResult([], 0, false));
+        Task.FromResult(new NeighborScanResult(Array.Empty<NeighborEntry>(), 0, false));
 }
 
 /// <summary>
@@ -36,7 +35,6 @@ public sealed class NullNeighborScanner : INeighborScanner
 /// administrator rights and no firewall changes. Calls block for up to a few seconds when nobody
 /// answers, so they run on a small pool of dedicated threads.
 /// </summary>
-[SupportedOSPlatform("windows")]
 public sealed class WindowsArpScanner : INeighborScanner
 {
     private const int NoError = 0;
@@ -64,12 +62,12 @@ public sealed class WindowsArpScanner : INeighborScanner
 
         if (work.Count == 0)
         {
-            return Task.FromResult(new NeighborScanResult([], 0, false));
+            return Task.FromResult(new NeighborScanResult(Array.Empty<NeighborEntry>(), 0, false));
         }
 
         var results = new ConcurrentBag<NeighborEntry>();
         var completion = new TaskCompletionSource<NeighborScanResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var workerCount = Math.Clamp(parallelism, 1, work.Count);
+        var workerCount = Compat.Clamp(parallelism, 1, work.Count);
         var next = -1;
         var done = 0;
         var accessDenied = 0;
@@ -160,7 +158,7 @@ public sealed class WindowsArpScanner : INeighborScanner
                 return -1;
             }
 
-            var parsed = MacAddress.FromBytes(buffer.AsSpan(0, 6));
+            var parsed = MacAddress.FromBytes(buffer);
             if (!parsed.IsUsableUnicast)
             {
                 return -1;

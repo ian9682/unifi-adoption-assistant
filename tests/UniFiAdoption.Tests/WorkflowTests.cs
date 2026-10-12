@@ -17,11 +17,11 @@ internal sealed class WorkflowTests
     {
         public FakeAccessPoint Device { get; } = new();
 
-        public List<FakeAccessPoint> OtherDevices { get; } = [];
+        public List<FakeAccessPoint> OtherDevices { get; } = new();
 
         public AssistantSettings Settings { get; } = new() { VerifySeconds = 0, VerifyPollSeconds = 1 };
 
-        public List<LocalInterfaceInfo> Interfaces { get; } = [FakeNetwork.Lan()];
+        public List<LocalInterfaceInfo> Interfaces { get; } = new() { FakeNetwork.Lan() };
 
         public bool AnswerDiscovery { get; set; } = true;
 
@@ -33,7 +33,7 @@ internal sealed class WorkflowTests
 
         public bool ControllerReachableFromPc { get; set; } = true;
 
-        public List<NeighborEntry> ExtraNeighbors { get; } = [];
+        public List<NeighborEntry> ExtraNeighbors { get; } = new();
 
         public string? DiscoverySourceOverride { get; set; }
 
@@ -52,7 +52,7 @@ internal sealed class WorkflowTests
                         DiscoveryProtocolTests.BuildReply(d.Mac.ToString(), DiscoverySourceOverride ?? d.Address.ToString()),
                         IPAddress.Parse(DiscoverySourceOverride ?? d.Address.ToString()))!)
                     .ToList()
-                : [];
+                : new List<UbntDiscoveryReply>();
             var neighbors = DiscoverySourceOverride is null
                 ? all.Select(d => new NeighborEntry(d.Address, d.Mac)).Concat(ExtraNeighbors).ToArray()
                 : ExtraNeighbors.ToArray();
@@ -81,7 +81,7 @@ internal sealed class WorkflowTests
         Assert.True(report.DeviceWasChanged);
         Assert.True(h.Device.Commands.Contains($"mca-cli-op set-inform '{InformUrl}'"), "set-inform with the exact quoted URL");
         Assert.Equal(1, h.Device.Commands.Count(c => c.StartsWith("mca-cli-op set-inform", StringComparison.Ordinal)));
-        Assert.False(h.Device.Commands.Any(c => c.Contains("/etc/hosts", StringComparison.Ordinal) && c.Contains(">>", StringComparison.Ordinal)), "no hosts change when DNS works");
+        Assert.False(h.Device.Commands.Any(c => c.IndexOf("/etc/hosts", StringComparison.Ordinal) >= 0 && c.IndexOf(">>", StringComparison.Ordinal) >= 0), "no hosts change when DNS works");
         Assert.Equal(InformUrl, h.Device.InformUrl);
         Assert.Equal("factory default login", report.Device!.LoginUsed);
         Assert.Contains("approves it", report.Message);
@@ -123,7 +123,7 @@ internal sealed class WorkflowTests
         Assert.False(report.DeviceWasChanged);
         Assert.False(h.Device.WasChanged, "no write commands in test mode");
         Assert.True(report.PlannedCommands.Contains($"mca-cli-op set-inform '{InformUrl}'"));
-        Assert.True(report.PlannedCommands.Any(c => c.Contains(">> /etc/hosts", StringComparison.Ordinal)));
+        Assert.True(report.PlannedCommands.Any(c => c.IndexOf(">> /etc/hosts", StringComparison.Ordinal) >= 0));
     }
 
     [Test]
@@ -142,7 +142,7 @@ internal sealed class WorkflowTests
         var report = await h.RunAsync("1234");
         Assert.Equal(AdoptionOutcome.NotFound, report.Outcome);
         Assert.Equal(0, h.Ssh!.ConnectAttempts);
-        Assert.True(report.NextSteps.Any(s => s.Contains("POE", StringComparison.Ordinal)));
+        Assert.True(report.NextSteps.Any(s => s.IndexOf("POE", StringComparison.Ordinal) >= 0));
     }
 
     [Test]
@@ -224,12 +224,13 @@ internal sealed class WorkflowTests
     }
 
     [Test]
-    public async Task WrongCredentialsAreReportedAndOnlyTheVerifiedDeviceIsTried()
+    public async Task RefusedFactoryPasswordMeansAlreadyAdoptedAndNothingChanges()
     {
         var h = new Harness();
-        h.Device.Password = "set-by-a-previous-controller";
+        h.Device.Password = "set-by-the-controller";
         var report = await h.RunAsync();
-        Assert.Equal(AdoptionOutcome.AuthenticationFailed, report.Outcome);
+        Assert.Equal(AdoptionOutcome.AlreadyAdopted, report.Outcome);
+        Assert.Equal(ResultTone.Success, report.Tone);
         Assert.False(report.DeviceWasChanged);
         Assert.Equal(1, h.Device.LoginAttempts.Count);
         Assert.Equal(CredentialSource.FactoryDefault, h.Device.LoginAttempts[0].Source);
@@ -259,13 +260,26 @@ internal sealed class WorkflowTests
     }
 
     [Test]
-    public async Task HostKeyChangeIsRefused()
+    public async Task HostKeyChangeIsAcceptedForTheFactoryLoginAfterAReset()
     {
         var h = new Harness();
         h.HostKeys.Remember(h.Device.Mac, h.Device.HostKeyAlgorithm, "AnEarlierDifferentFingerprint");
         var report = await h.RunAsync();
+        Assert.Equal(AdoptionOutcome.PendingAdoption, report.Outcome);
+        Assert.Equal(HostKeyCheck.TrustedKnown, h.HostKeys.Check(h.Device.Mac, h.Device.HostKeyAlgorithm, h.Device.HostKeyFingerprint), "new key re-recorded");
+    }
+
+    [Test]
+    public async Task HostKeyChangeIsRefusedWhenAnItLoginWouldBeSent()
+    {
+        var h = new Harness();
+        h.Device.Username = "siteadmin";
+        h.Device.Password = "Sup3r-Secret-Value";
+        h.HostKeys.Remember(h.Device.Mac, h.Device.HostKeyAlgorithm, "AnEarlierDifferentFingerprint");
+        var report = await h.RunAsync(session: new SshCredential("siteadmin", "Sup3r-Secret-Value", CredentialSource.ItProvidedThisSession));
         Assert.Equal(AdoptionOutcome.HostKeyMismatch, report.Outcome);
         Assert.False(h.Device.WasChanged);
+        Assert.Equal(0, h.Device.LoginAttempts.Count, "the password was never sent");
     }
 
     [Test]
@@ -334,7 +348,7 @@ internal sealed class WorkflowTests
         h.Device.StatusAfterSetInform = "Timeout";
         var report = await h.RunAsync();
         Assert.Equal(AdoptionOutcome.ControllerNameUnresolvable, report.Outcome);
-        Assert.False(h.Device.Commands.Any(c => c.Contains(">> /etc/hosts", StringComparison.Ordinal)), "hosts untouched without a configured fallback IP");
+        Assert.False(h.Device.Commands.Any(c => c.IndexOf(">> /etc/hosts", StringComparison.Ordinal) >= 0), "hosts untouched without a configured fallback IP");
         Assert.Contains("can't reach the controller either", report.Message);
     }
 
@@ -348,7 +362,7 @@ internal sealed class WorkflowTests
 
         var first = await h.RunAsync();
         Assert.Equal(AdoptionOutcome.PendingAdoption, first.Outcome);
-        Assert.True(first.TechnicalNotes.Any(n => n.Contains("malformed", StringComparison.Ordinal)));
+        Assert.True(first.TechnicalNotes.Any(n => n.IndexOf("malformed", StringComparison.Ordinal) >= 0));
 
         await h.RunAsync();
         await h.RunAsync();
@@ -365,7 +379,7 @@ internal sealed class WorkflowTests
         h.Device.HostsContent = "10.0.0.9 unifi.oneacrefund.org\n";
         h.Settings.HostsFallbackControllerIp = "203.0.113.10";
         var report = await h.RunAsync(testMode: true);
-        Assert.False(report.PlannedCommands.Any(c => c.Contains("/etc/hosts", StringComparison.Ordinal)));
+        Assert.False(report.PlannedCommands.Any(c => c.IndexOf("/etc/hosts", StringComparison.Ordinal) >= 0));
     }
 
     [Test]

@@ -52,11 +52,17 @@ internal sealed class FakeAccessPoint
 
     public string HostKeyFingerprint { get; set; } = "Q2hlY2tUaGlzRmFrZUtleUZpbmdlcnByaW50";
 
-    public List<string> Commands { get; } = [];
+    public List<string> Commands { get; } = new();
 
-    public List<SshCredential> LoginAttempts { get; } = [];
+    /// <summary>Optional delay per command, to observe concurrency in batch tests.</summary>
+    public TimeSpan CommandDelay { get; set; }
 
-    public bool WasChanged => Commands.Any(c => c.StartsWith("mca-cli-op set-inform", StringComparison.Ordinal) || c.Contains(">> /etc/hosts", StringComparison.Ordinal) || c.StartsWith("set-inform", StringComparison.Ordinal));
+    /// <summary>Fail this many SSH connections with "unavailable" before succeeding (retry tests).</summary>
+    public int FailConnectionsRemaining { get; set; }
+
+    public List<SshCredential> LoginAttempts { get; } = new();
+
+    public bool WasChanged => Commands.Any(c => c.StartsWith("mca-cli-op set-inform", StringComparison.Ordinal) || c.IndexOf(">> /etc/hosts", StringComparison.Ordinal) >= 0 || c.StartsWith("set-inform", StringComparison.Ordinal));
 
     public CommandResult Execute(string command)
     {
@@ -153,7 +159,7 @@ internal sealed class FakeAccessPoint
             }
             else if (step.Send.StartsWith("set-inform ", StringComparison.Ordinal))
             {
-                InformUrl = step.Send["set-inform ".Length..];
+                InformUrl = step.Send.Substring("set-inform ".Length);
                 StatusState = StatusAfterSetInform;
                 transcript += $"{step.Send}\r\nAdoption request sent to '{InformUrl}'.  Use the controller to complete the adopt process.\r\nUBNT# ";
             }
@@ -179,7 +185,11 @@ internal sealed class FakeSshConnector(params FakeAccessPoint[] devices) : ISshC
 
     public Task<ISshSession> ConnectAsync(SshConnectRequest request, CancellationToken cancellationToken)
     {
-        ConnectAttempts++;
+        lock (this)
+        {
+            ConnectAttempts++;
+        }
+
         var device = devices.FirstOrDefault(d => d.Address.Equals(request.Address))
                      ?? throw new SshUnavailableException("No device at that address.");
         if (!device.SshAvailable)
@@ -187,12 +197,22 @@ internal sealed class FakeSshConnector(params FakeAccessPoint[] devices) : ISshC
             throw new SshUnavailableException("Connection refused.");
         }
 
+        if (device.FailConnectionsRemaining > 0)
+        {
+            device.FailConnectionsRemaining--;
+            throw new SshUnavailableException("Connection reset.");
+        }
+
         if (request.VerifyHostKey(device.HostKeyAlgorithm, device.HostKeyFingerprint) == HostKeyCheck.Rejected)
         {
             throw new SshHostKeyRejectedException(device.HostKeyAlgorithm, device.HostKeyFingerprint);
         }
 
-        device.LoginAttempts.Add(request.Credential);
+        lock (device)
+        {
+            device.LoginAttempts.Add(request.Credential);
+        }
+
         if (request.Credential.Username != device.Username || request.Credential.Password != device.Password)
         {
             throw new SshAuthenticationFailedException("Permission denied.");
@@ -201,22 +221,49 @@ internal sealed class FakeSshConnector(params FakeAccessPoint[] devices) : ISshC
         return Task.FromResult<ISshSession>(new FakeSession(device));
     }
 
-    private sealed class FakeSession(FakeAccessPoint device) : ISshSession
+    internal sealed class FakeSession(FakeAccessPoint device) : ISshSession
     {
         public string? HostKeyAlgorithm => device.HostKeyAlgorithm;
 
         public string? HostKeyFingerprint => device.HostKeyFingerprint;
 
-        public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken cancellationToken)
+        public static int Concurrent;
+
+        public static int MaxConcurrent;
+
+        public async Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(device.Execute(command));
+            var now = Interlocked.Increment(ref Concurrent);
+            int seen;
+            while (now > (seen = MaxConcurrent) && Interlocked.CompareExchange(ref MaxConcurrent, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                if (device.CommandDelay > TimeSpan.Zero)
+                {
+                    await Task.Delay(device.CommandDelay, cancellationToken);
+                }
+
+                lock (device)
+                {
+                    return device.Execute(command);
+                }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref Concurrent);
+            }
         }
 
         public Task<InteractiveResult> RunInteractiveAsync(IReadOnlyList<InteractiveStep> steps, TimeSpan stepTimeout, CancellationToken cancellationToken) =>
             Task.FromResult(device.ExecuteInteractive(steps));
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void Dispose()
+        {
+        }
     }
 }
 
@@ -248,7 +295,7 @@ internal sealed class FakeNeighbors(params NeighborEntry[] entries) : INeighborS
         IProgress<double>? progress, CancellationToken cancellationToken)
     {
         progress?.Report(1.0);
-        return Task.FromResult(new NeighborScanResult(entries, 254, false));
+        return Task.FromResult(new NeighborScanResult(entries.ToList(), 254, false));
     }
 }
 

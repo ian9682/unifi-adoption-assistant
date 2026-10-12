@@ -1,8 +1,7 @@
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
+using UniFiAdoption.Core.Json;
 using UniFiAdoption.Core.Ssh;
 
 namespace UniFiAdoption.Core.Security;
@@ -25,7 +24,6 @@ public interface ICredentialStore
 /// Stores a device login encrypted with Windows DPAPI for the current Windows user account, so it
 /// cannot be read by other accounts or on another computer. Nothing is compiled into the program.
 /// </summary>
-[SupportedOSPlatform("windows")]
 public sealed class DpapiCredentialStore : ICredentialStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("UniFiAdoptionAssistant/device-login/v1");
@@ -52,12 +50,13 @@ public sealed class DpapiCredentialStore : ICredentialStore
         try
         {
             clear = Dpapi.Unprotect(File.ReadAllBytes(_path), Entropy);
-            var stored = JsonSerializer.Deserialize<StoredLogin>(clear);
-            return stored is { Username.Length: > 0, Password: not null }
-                ? new SshCredential(stored.Username, stored.Password, CredentialSource.ItSavedOnThisComputer)
+            return MiniJson.Parse(Encoding.UTF8.GetString(clear)) is Dictionary<string, object?> stored &&
+                   stored.TryGetValue("u", out var u) && u is string username && username.Length > 0 &&
+                   stored.TryGetValue("p", out var p) && p is string password
+                ? new SshCredential(username, password, CredentialSource.ItSavedOnThisComputer)
                 : null;
         }
-        catch (Exception ex) when (ex is CryptographicException or JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is CryptographicException or FormatException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -65,14 +64,14 @@ public sealed class DpapiCredentialStore : ICredentialStore
         {
             if (clear is not null)
             {
-                CryptographicOperations.ZeroMemory(clear);
+                Array.Clear(clear, 0, clear.Length);
             }
         }
     }
 
     public void Save(string username, string password)
     {
-        var clear = JsonSerializer.SerializeToUtf8Bytes(new StoredLogin(username, password));
+        var clear = Encoding.UTF8.GetBytes(MiniJson.Serialize(new Dictionary<string, object?> { ["u"] = username, ["p"] = password }));
         try
         {
             var protectedBytes = Dpapi.Protect(clear, Entropy);
@@ -81,7 +80,7 @@ public sealed class DpapiCredentialStore : ICredentialStore
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(clear);
+            Array.Clear(clear, 0, clear.Length);
         }
     }
 
@@ -92,12 +91,9 @@ public sealed class DpapiCredentialStore : ICredentialStore
             File.Delete(_path);
         }
     }
-
-    private sealed record StoredLogin(string Username, string Password);
 }
 
 /// <summary>Minimal DPAPI (CryptProtectData) wrapper for the current user, without extra packages.</summary>
-[SupportedOSPlatform("windows")]
 internal static class Dpapi
 {
     private const int CryptProtectUiForbidden = 0x1;
@@ -118,7 +114,7 @@ internal static class Dpapi
                 : CryptUnprotectData(ref input, IntPtr.Zero, ref entropyBlob, IntPtr.Zero, IntPtr.Zero, CryptProtectUiForbidden, ref output);
             if (!ok)
             {
-                throw new CryptographicException(Marshal.GetLastPInvokeError());
+                throw new CryptographicException(Marshal.GetLastWin32Error());
             }
 
             var result = new byte[output.Size];

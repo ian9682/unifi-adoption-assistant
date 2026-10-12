@@ -2,200 +2,136 @@
 
 *Farmers First!*
 
-Built by the One Acre Fund ITO Networks Team. A small Windows program that points a UniFi AC Pro access point at the central UniFi controller
-(`http://unifi.oneacrefund.org:8080/inform`). The person at the site types the last four characters
-of the access point's MAC address and clicks one button. The program finds that exact device on the
-local network, checks it is the right one, logs in over SSH, sends the controller address, reads back
-the device's status, and says in plain language what happened and what to do next.
+A small Windows program that connects UniFi access points to One Acre Fund's central UniFi controller
+(`http://unifi.oneacrefund.org:8080/inform`). Version 2 finds the access points on the network by
+itself, sorts them into plain-language groups and sets up several at once. The ITO Networks Team then
+approves them in the controller, and the list notices on its own when that has happened.
 
-![Main window after a run (rendered with Mono on Linux for verification; on Windows it uses Segoe UI)](docs/screenshot-mono.png)
+![The live list](docs/screenshot-live-list.png)
 
 ## Using it at a site
 
-1. Plug the access point's cable into the **POE** port of its power adapter, and connect the adapter's
-   **LAN** port to the router or network switch. Wait about 2 minutes until its light is on.
-2. Connect this computer to the same office network (cable or office Wi-Fi, not guest Wi-Fi).
-3. Open **UniFi Adoption Assistant**, type the last 4 characters of the MAC address from the label on
-   the back of the access point, and click **Find and Configure Access Point**.
-4. Follow the message that appears. If asked, click **Copy support details** and send them to the ITO Networks Team.
+1. Plug in the access points (cable into the **POE** port of the power adapter, the adapter's **LAN**
+   port into the site's switch) and connect this computer to the same network.
+2. Open **UniFi Adoption Assistant**. Access points appear by themselves within a few seconds.
+3. Access points that are ready are ticked automatically. Untick any you don't want, then click
+   **Set up N access points**.
+4. When it finishes, click **Copy message for the ITO Networks Team** and paste it into Teams or an
+   email. Leave the window open: once the team approves, the access points move to **Already adopted**.
 
-Running it again is safe. It changes nothing unless exactly one matching UniFi device is found and
-that device confirms its own MAC address.
+Looking for one particular access point? Type the last 4 characters of its MAC address in the search
+box. The list then shows only that access point.
 
-## What it does, step by step
+## The groups in the list
 
-| Step | How | Changes the device? |
-|---|---|---|
-| Check the 4 characters | Hex only; plain-language hints (O→0, I/L→1) | No |
-| Read this PC's networks | Active IPv4 adapters; VPN/virtual adapters skipped; self-assigned 169.254.x.x detected | No |
-| Find devices | Ubiquiti discovery broadcast (UDP 10001) **and** an ARP sweep (Windows `SendARP`), in parallel. ARP works even if the device ignores ping | No |
-| Pick the device | Exactly one MAC ending in the 4 characters; must answer Ubiquiti discovery or have a Ubiquiti OUI; must have exactly one reachable address | No |
-| Check SSH | Reads the SSH banner without sending a password | No |
-| Log in | IT-entered login (if any), then IT-saved login (if any), then the factory login `ubnt`/`ubnt` (if allowed). At most 3 attempts, only on the verified device | No |
-| Check identity | Host key checked against the key remembered for that MAC; the device must report the expected MAC itself; model must start with `UAP` | No |
-| Check name lookup | `ping -c 1 -W 2 '<controller>'` on the device, read only for name resolution | No |
-| Configure | `mca-cli-op set-inform '<inform URL>'` (see below why not `mca-cli`) | **Yes** |
-| Verify | Polls `mca-cli-op info` for up to 45 s and reports the device's own status | No |
-
-Test mode (Admin settings, or start with `--test`) stops before "Configure" and shows the exact commands a
-real run would send.
-
-### About the legacy commands
-
-The previous manual procedure was:
-
-```
-echo unifi.oneacrefund.org unifi >> /etc/hosts
-mca-cli
-set-inform http://unifi.oneacrefund.org:8080/inform
-```
-
-* **The `/etc/hosts` line has no effect.** A hosts line must start with an IP address
-  (`203.0.113.10 unifi.oneacrefund.org`). `unifi.oneacrefund.org unifi` has none, so it is ignored. It
-  also repeats each time the command is run and disappears when the access point restarts. The
-  program does not touch `/etc/hosts` unless IT sets `HostsFallbackControllerIp`. Then it adds one
-  correctly formatted line, only if the access point cannot resolve the name, and never duplicates it.
-* **`mca-cli` is interactive** and does not work in a non-interactive SSH command. The program uses
-  `mca-cli-op set-inform`, the non-interactive form. It falls back to driving an interactive
-  `mca-cli` session in a pseudo-terminal only on firmware without `mca-cli-op`.
-
-## Result messages
-
-Each run ends in one outcome. The window shows a plain message and next steps; IT gets the details.
-
-| Outcome | Meaning |
+| Group | Meaning |
 |---|---|
-| Access point connected | The device itself reports *Connected* to the configured inform URL |
-| Already connected | It already reported *Connected* to this controller; nothing was changed |
-| Done here – waiting for IT to approve it | The device now reports the configured inform URL; adoption needs approval in the controller |
-| Sent – IT needs to check it | Accepted, but the status could not be read back (interactive fallback) |
-| Set up, but it can't reach / find the controller yet | URL set, but the device reports a timeout or cannot resolve the controller name |
-| The controller refused the access point | Device reports a rejection |
-| Check the characters | Invalid input |
-| Access point not found / more than one device matches / not a UniFi access point / on a different network / more than one address | Discovery problems; nothing changed |
-| Won't accept the setup connection / didn't accept the login / security check failed / device didn't match / can't be set up automatically | Problems before any change; nothing changed |
-| The access point didn't take the controller address | `set-inform` was not confirmed |
-| This computer blocked the search / isn't connected / settings problem / stopped / something went wrong | Local problems |
+| **Ready to set up** | It accepts the factory password and isn't pointed at our controller yet. Ticked automatically |
+| **Setting up** | Being set up right now, with a step-by-step note |
+| **Waiting for approval** | It has our controller's address; the ITO Networks Team needs to approve it |
+| **Needs a look** | Something needs attention; the sentence under it says what (for example "Not accepting setup connections yet") |
+| **Checking** | Just found; being checked |
+| **Already adopted** | Folded away by default. Rule agreed with the ITO Networks Team: **SSH is open but the factory password is refused**, which means the controller has adopted it |
 
-"Connected" is only reported when the access point says so; a successful SSH command is never
-treated as adoption.
+Adopted access points are left alone. Each one gets a single read-only login check with the public
+factory password. After that it isn't touched again unless someone clicks **Search again**.
+
+## How it works
+
+- **Finding access points:** Ubiquiti's discovery broadcast (UDP 10001) every 30 seconds, plus an ARP
+  sweep of the local network every 2 minutes. Only Ubiquiti devices are listed. The traffic is light.
+- **Checking (read-only):** port 22 is checked first, then the factory login is tried. If it works,
+  `mca-cli-op info` tells us the access point's own status. Nothing is changed during a check.
+- **Setting up:** the same per-device steps as version 1. Each access point is re-checked first. The
+  device must confirm its own MAC address before anything is changed. Then `mca-cli-op set-inform`
+  runs, with the old interactive `mca-cli` only as a fallback. Three access points at a time by
+  default. Temporary failures are retried twice; stopping never cuts a command in half.
+- **Approval:** access points waiting for approval are re-checked every 45 seconds. When the factory
+  password stops working (with SSH still open), the access point moves to **Already adopted**.
+
+The single-device logic from version 1 is still inside and fully tested. Every path uses one engine,
+one device list keyed by MAC address, and the same safety checks.
 
 ## Building
 
-Requirements: Windows 10/11 with the [.NET 10 SDK](https://dotnet.microsoft.com/download), and
-[Inno Setup 6](https://jrsoftware.org/isinfo.php) for the installer (optional).
+On Windows with the [.NET 10 SDK](https://dotnet.microsoft.com/download) (it builds the .NET Framework
+4.8 app) and, optionally, [Inno Setup 6](https://jrsoftware.org/isinfo.php) for the installer:
 
 ```powershell
-./build/publish.ps1 -Version 1.0.0
-# with a pre-configured settings file and code signing:
-./build/publish.ps1 -Version 1.0.0 -SettingsFile C:\it\settings.json -CertificatePath C:\certs\codesign.pfx -CertificatePassword (Read-Host -AsSecureString)
+./build/publish.ps1 -Version 2.0.0
 ```
 
-The script runs the tests and produces `artifacts\UniFiAdoptionAssistant.exe` (the whole app in one
-file), the optional installer `artifacts\UniFiAdoptionAssistant-Setup.exe`, and `artifacts\SHA256SUMS.txt`.
-GitHub Actions offers the exe and the installer as two separate downloads, so the app is not downloaded twice. Users need no .NET installation, no administrator rights and no
-command prompt. The 32-bit build is deliberate: one file runs on 32-bit and 64-bit Windows 10/11.
+The script:
 
-The GitHub Actions workflow in `.github/workflows/build.yml` does the same on every push and creates a
-GitHub release when a tag such as `v1.0.0` is pushed. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
-for hosting a stable download link.
+- runs the tests on .NET Framework 4.8 and on .NET 10;
+- builds `artifacts\UniFiAdoptionAssistant.exe`, a single file that runs on Windows 10 (version 1903
+  or later) and Windows 11 without installing anything;
+- builds the optional installer `UniFiAdoptionAssistant-Setup.exe` and `SHA256SUMS.txt`.
 
-Tests (any OS with the .NET 10 SDK):
+Version 2 targets .NET Framework 4.8, which is built into Windows, instead of carrying its own copy of
+.NET. That is why the exe is a few megabytes instead of 48 MB. Costura packs the SSH library inside
+the exe, so it is still one file.
 
-```
-dotnet run --project tests/UniFiAdoption.Tests -c Release
-```
-
-## Branding
-
-The window uses the One Acre Fund logo green (#2B7F68), defined with the rest of the palette in
-`src/UniFiAdoption.App/Theme.cs`. The logo (`Assets/logo.png`), the white leaf used as the header
-watermark (`Assets/leaf-white.png`) and the leaf app icon (`Assets/app.ico`) were prepared from the
-One Acre Fund logo and are built into the exe. To use a higher-resolution logo from the brand kit,
-replace `Assets/logo.png` with a transparent PNG of the same shape.
-
-## Size
-
-The exe is about 48 MB because it carries its own copy of .NET 10, so nothing has to be installed on
-the PC. Windows Forms apps cannot be safely trimmed in .NET 10. The way to get it down to a few MB is to
-retarget the app to .NET Framework 4.8, which is already built into Windows 10 and 11. That is a
-planned follow-up, to be done after the hardware tests pass.
+GitHub Actions (`.github/workflows/build.yml`) does the same on every push and offers the exe and the
+installer as separate downloads. Pushing a tag such as `v2.0.0` creates a GitHub release.
 
 ## Configuration
 
-Everything has a working default, so no settings file is required. To change something, copy
-`settings.example.json` to `settings.json` next to the exe (or to
-`C:\ProgramData\UniFiAdoptionAssistant\settings.json`). The first file found wins. The main options:
+No settings file is needed. To change something, copy `settings.example.json` to `settings.json` next
+to the exe, or to `C:\ProgramData\UniFiAdoptionAssistant\settings.json`. The main options:
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `InformUrl` | `http://unifi.oneacrefund.org:8080/inform` | Controller inform URL (strictly validated) |
-| `SupportContact` | `the ITO Networks Team` | Used in messages ("Contact the ITO Networks Team") |
-| `AllowFactoryDefaultCredentials` | `true` | Try `ubnt`/`ubnt` on the verified device |
-| `HostsFallbackControllerIp` | empty | Add `<ip> <host>` to the device's `/etc/hosts` if it can't resolve the name |
-| `ExtraUbiquitiOuis` | `[]` | Extra Ubiquiti MAC prefixes to accept |
+| `SupportContact` | `the ITO Networks Team` | Used in messages |
+| `BatchConcurrency` | `3` | Access points set up at the same time |
+| `RecheckWaitingSeconds` | `45` | How often access points waiting for approval are checked |
+| `DiscoveryIntervalSeconds` / `ArpSweepIntervalSeconds` | `30` / `120` | How often the list searches |
 | `SupportedModelPrefixes` | `["UAP"]` | Use `["UAP-AC-Pro"]` to allow AC Pro only |
-| `AllowInteractiveMcaCliFallback` | `true` | Legacy `mca-cli` session if `mca-cli-op` is missing |
-| `VerifySeconds` | `45` | How long to watch the device status after `set-inform` |
-| `PinnedHostKeys` | `{}` | Require a specific SSH host key for a MAC |
-| `TestMode` | `false` | Start in test mode |
-| `DeviceImagePath` | empty | Photo to show instead of the built-in drawing |
+| `HostsFallbackControllerIp` | empty | Only for sites whose DNS can't resolve the controller name |
+| `TestMode` | `false` | Check and show what would happen, without changing anything |
 
-Device logins are never stored in settings. IT can enter one under **Admin settings**, for this session
-or saved for the current Windows user (encrypted with Windows DPAPI).
+Device logins never go in settings. If one is ever needed, enter it under **Admin settings**. It is
+stored encrypted for the current Windows user.
 
 ## Files on the user's computer
 
-| Path (under `%LOCALAPPDATA%\UniFiAdoptionAssistant`) | Contents |
+Under `%LOCALAPPDATA%\UniFiAdoptionAssistant`:
+
+| Path | Contents |
 |---|---|
-| `logs\assistant-YYYYMMDD.log` | Diagnostic log; kept 30 days; passwords never written |
-| `known-devices.json` | SSH host-key fingerprints per access point MAC |
-| `device-login.bin` | Optional IT-saved login, DPAPI-encrypted |
-
-## Troubleshooting (for IT)
-
-* **Not found, but the access point is on:** is the PC on the same layer-2 network/VLAN (not guest
-  Wi-Fi with client isolation)? Did the access point get a DHCP address? Without DHCP it uses
-  192.168.1.20, which is reported as "on a different network" if its discovery reply is received.
-* **Login refused:** the device was adopted before and uses the site's device credentials from its old
-  controller. Enter them under Admin settings, or factory-reset the device (hold reset ~10 s).
-* **Security check failed:** the device's SSH key changed, normally after a factory reset. Clear saved
-  fingerprints in Admin settings.
-* **Waiting for approval does not progress:** adopt the device in the controller. Also check the
-  controller's *Inform Host override* (see the deployment guide).
-* Every run is in the log; **Copy support details** puts a summary plus the recent log on the clipboard.
+| `logs\assistant-YYYYMMDD.log` | Diagnostic log, kept 30 days. Passwords are never written |
+| `known-devices.json` | SSH fingerprints per access point MAC |
+| `device-login.bin` | Optional login saved in Admin settings (DPAPI-encrypted) |
 
 ## Project layout
 
 ```
-src/UniFiAdoption.Core      Engine (platform-neutral, fully tested): discovery, matching, SSH, commands, workflow
-src/UniFiAdoption.App       Windows Forms window (presentation only)
-tests/UniFiAdoption.Tests   Dependency-free test runner: unit, scenario and integration tests
-tests/simulated-device      Simulated access point (dropbear + fake mca-cli-op) for integration tests
-build/publish.ps1           Test, publish, sign, zip, installer, checksums
-installer/                  Inno Setup script (per-user install)
-docs/                       Architecture, deployment, test plan, limitations
+src/UniFiAdoption.Core       Engine: discovery, inventory, classification, checks, SSH, batches (net48 + net10.0)
+src/UniFiAdoption.App        Windows Forms window (net48, single exe via Costura)
+tests/UniFiAdoption.Tests    Unit, scenario, live-list, batch and real-SSH integration tests (net48 + net10.0)
+tests/simulated-device       Simulated access point (dropbear + fake mca-cli-op) for integration tests
+build/publish.ps1            Test, build, sign, installer, checksums
+installer/                   Inno Setup script (per-user install)
+docs/                        Architecture, deployment, test plan, limitations, changelog
 ```
 
-## What has and has not been verified
+## What has and hasn't been verified
 
-Verified while building this release:
+Verified while building version 2:
 
-* The engine compiles with no warnings, and all 64 unit and scenario tests pass.
-* 7 integration tests pass against a simulated access point. They use the real SSH.NET connector
-  and real UDP discovery against dropbear, the SSH server UniFi firmware uses, with stand-in
-  `mca-cli-op`/`mca-cli` scripts. They cover test mode, a real `set-inform`, host-key
-  remembering, pinning and mismatch, wrong password, closed SSH port, unresolvable controller
-  name, and the interactive `mca-cli` fallback over a pseudo-terminal.
-* The window's source compiles against the WinForms API. It was rendered and exercised under
-  Mono on Linux: initial screen, typing, result, test mode, and Admin settings.
+- All 94 tests pass on .NET 10. They include the end-to-end test of the adoption rule with real
+  SSH against a simulated access point: ready, then sent, then waiting for approval, then the password
+  changes, then adopted.
+- The engine compiles with zero warnings for .NET 10 and against .NET Framework 4.8 reference
+  assemblies.
+- The window was built for .NET Framework 4.8 and run under Mono with six simulated access points. The
+  live list, search, batch, summary and approval detection all worked.
 
-**Not yet verified:**
+Not yet verified:
 
-* Behaviour on real UniFi AC Pro firmware. The output formats of `mca-cli-op` and the status wording
-  are based on known UniFi behaviour, not on a device in this lab.
-* The Windows ARP sweep on Windows.
-* The .NET 10 Windows build, which is produced by the CI workflow.
+- Behaviour on real UniFi AC Pro firmware.
+- The Windows-native .NET Framework build and the tests running on .NET Framework (CI does both).
+- The final exe size.
 
-Run the lab checklist in [docs/TEST-PLAN.md](docs/TEST-PLAN.md) before rollout. See
-[docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+Run the lab checklist in [docs/TEST-PLAN.md](docs/TEST-PLAN.md) before rollout.

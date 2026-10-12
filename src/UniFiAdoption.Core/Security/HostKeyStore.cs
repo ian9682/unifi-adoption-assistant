@@ -1,4 +1,4 @@
-using System.Text.Json;
+using UniFiAdoption.Core.Json;
 using UniFiAdoption.Core.Networking;
 using UniFiAdoption.Core.Ssh;
 
@@ -8,7 +8,11 @@ public interface IHostKeyStore
 {
     HostKeyCheck Check(MacAddress mac, string algorithm, string fingerprint);
 
-    void Remember(MacAddress mac, string algorithm, string fingerprint);
+    /// <summary>Records a key. With <paramref name="replace"/>, an existing key for that algorithm is overwritten (after a factory reset).</summary>
+    void Remember(MacAddress mac, string algorithm, string fingerprint, bool replace = false);
+
+    /// <summary>True when IT pinned a key for this device in settings (always enforced strictly).</summary>
+    bool IsPinned(MacAddress mac);
 
     void Clear();
 }
@@ -23,8 +27,6 @@ public interface IHostKeyStore
 /// </summary>
 public sealed class JsonHostKeyStore : IHostKeyStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-
     private readonly object _gate = new();
     private readonly string _path;
     private readonly IReadOnlyDictionary<string, string> _pinned;
@@ -61,7 +63,9 @@ public sealed class JsonHostKeyStore : IHostKeyStore
         return HostKeyCheck.TrustedFirstUse;
     }
 
-    public void Remember(MacAddress mac, string algorithm, string fingerprint)
+    public bool IsPinned(MacAddress mac) => _pinned.ContainsKey(mac.Hex);
+
+    public void Remember(MacAddress mac, string algorithm, string fingerprint, bool replace = false)
     {
         lock (_gate)
         {
@@ -71,7 +75,7 @@ public sealed class JsonHostKeyStore : IHostKeyStore
                 _known[mac.Hex] = keys;
             }
 
-            if (keys.ContainsKey(algorithm))
+            if (keys.ContainsKey(algorithm) && !replace)
             {
                 return;
             }
@@ -95,7 +99,7 @@ public sealed class JsonHostKeyStore : IHostKeyStore
         var value = fingerprint.Trim();
         if (value.StartsWith("SHA256:", StringComparison.OrdinalIgnoreCase))
         {
-            value = value[7..];
+            value = value.Substring(7);
         }
 
         return value.TrimEnd('=');
@@ -103,23 +107,41 @@ public sealed class JsonHostKeyStore : IHostKeyStore
 
     private static Dictionary<string, Dictionary<string, KnownKey>> Load(string path)
     {
+        var result = new Dictionary<string, Dictionary<string, KnownKey>>(StringComparer.Ordinal);
         try
         {
-            if (File.Exists(path))
+            if (File.Exists(path) && MiniJson.Parse(File.ReadAllText(path)) is Dictionary<string, object?> root)
             {
-                var loaded = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, KnownKey>>>(File.ReadAllText(path));
-                if (loaded is not null)
+                foreach (var device in root)
                 {
-                    return new Dictionary<string, Dictionary<string, KnownKey>>(loaded, StringComparer.Ordinal);
+                    if (device.Value is not Dictionary<string, object?> keys)
+                    {
+                        continue;
+                    }
+
+                    var map = new Dictionary<string, KnownKey>(StringComparer.Ordinal);
+                    foreach (var key in keys)
+                    {
+                        if (key.Value is Dictionary<string, object?> entry && entry.TryGetValue("fingerprint", out var fp) && fp is string fingerprint)
+                        {
+                            var firstSeen = entry.TryGetValue("firstSeenUtc", out var fs) && fs is string text &&
+                                            DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
+                                ? parsed
+                                : DateTimeOffset.UtcNow;
+                            map[key.Key] = new KnownKey(fingerprint, firstSeen);
+                        }
+                    }
+
+                    result[device.Key.ToUpperInvariant()] = map;
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
         {
             // An unreadable file is treated as empty; it will be rewritten on the next save.
         }
 
-        return new Dictionary<string, Dictionary<string, KnownKey>>(StringComparer.Ordinal);
+        return result;
     }
 
     private void Save()
@@ -127,9 +149,14 @@ public sealed class JsonHostKeyStore : IHostKeyStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            var document = _known.ToDictionary(
+                d => d.Key,
+                d => (object?)d.Value.ToDictionary(
+                    k => k.Key,
+                    k => (object?)new Dictionary<string, object?> { ["fingerprint"] = k.Value.Fingerprint, ["firstSeenUtc"] = k.Value.FirstSeenUtc }));
             var temp = _path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(_known, JsonOptions));
-            File.Move(temp, _path, overwrite: true);
+            File.WriteAllText(temp, MiniJson.Serialize(document));
+            Compat.ReplaceFile(temp, _path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

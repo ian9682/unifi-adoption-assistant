@@ -76,7 +76,7 @@ internal sealed class HeroPanel : TableLayoutPanel
     }
 }
 
-/// <summary>White strip with the logo; draws a hairline at the bottom edge.</summary>
+/// <summary>White strip (logo bar or action bar); draws a hairline on its bottom or top edge.</summary>
 internal sealed class BrandBar : TableLayoutPanel
 {
     public BrandBar()
@@ -85,11 +85,16 @@ internal sealed class BrandBar : TableLayoutPanel
         BackColor = Color.White;
     }
 
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool TopLine { get; set; }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
         using var pen = new Pen(Theme.BrandLine);
-        e.Graphics.DrawLine(pen, 0, Height - 1, Width, Height - 1);
+        var y = TopLine ? 0 : Height - 1;
+        e.Graphics.DrawLine(pen, 0, y, Width, y);
     }
 }
 

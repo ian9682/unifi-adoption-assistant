@@ -14,7 +14,7 @@ public readonly struct MacAddress : IEquatable<MacAddress>
     public string Hex => _value.ToString("X12", CultureInfo.InvariantCulture);
 
     /// <summary>The organisationally unique identifier (first six hex digits).</summary>
-    public string Oui => Hex[..6];
+    public string Oui => Hex.Substring(0, 6);
 
     public bool IsZero => _value == 0;
 
@@ -23,17 +23,17 @@ public readonly struct MacAddress : IEquatable<MacAddress>
 
     public bool IsUsableUnicast => !IsZero && !IsMulticast;
 
-    public static MacAddress FromBytes(ReadOnlySpan<byte> bytes)
+    public static MacAddress FromBytes(byte[] bytes, int offset = 0)
     {
-        if (bytes.Length != 6)
+        if (bytes.Length - offset < 6)
         {
             throw new ArgumentException("A MAC address has exactly 6 bytes.", nameof(bytes));
         }
 
         ulong value = 0;
-        foreach (var b in bytes)
+        for (var i = offset; i < offset + 6; i++)
         {
-            value = (value << 8) | b;
+            value = (value << 8) | bytes[i];
         }
 
         return new MacAddress(value);
@@ -48,29 +48,28 @@ public readonly struct MacAddress : IEquatable<MacAddress>
             return false;
         }
 
-        Span<char> hex = stackalloc char[12];
-        var count = 0;
-        foreach (var c in text.AsSpan().Trim())
+        var hex = new System.Text.StringBuilder(12);
+        foreach (var c in text!.Trim())
         {
             if (c is ':' or '-' or '.')
             {
                 continue;
             }
 
-            if (!char.IsAsciiHexDigit(c) || count == hex.Length)
+            if (!Compat.IsHex(c) || hex.Length == 12)
             {
                 return false;
             }
 
-            hex[count++] = c;
+            hex.Append(c);
         }
 
-        if (count != hex.Length)
+        if (hex.Length != 12)
         {
             return false;
         }
 
-        mac = new MacAddress(ulong.Parse(hex, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture));
+        mac = new MacAddress(ulong.Parse(hex.ToString(), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture));
         return true;
     }
 
@@ -79,10 +78,17 @@ public readonly struct MacAddress : IEquatable<MacAddress>
 
     public bool EndsWith(MacSuffix suffix) => Hex.EndsWith(suffix.Value, StringComparison.Ordinal);
 
+    /// <summary>True if the hex digits typed so far (2 to 12, separators ignored) match the end of this address.</summary>
+    public bool EndsWithHex(string? typed)
+    {
+        var cleaned = MacSuffix.Clean(typed);
+        return cleaned.Length >= 2 && Hex.EndsWith(cleaned, StringComparison.Ordinal);
+    }
+
     public override string ToString()
     {
         var hex = Hex;
-        return string.Join(':', Enumerable.Range(0, 6).Select(i => hex.Substring(i * 2, 2)));
+        return string.Join(":", Enumerable.Range(0, 6).Select(i => hex.Substring(i * 2, 2)));
     }
 
     public bool Equals(MacAddress other) => _value == other._value;
@@ -112,11 +118,13 @@ public sealed class MacSuffix
     /// Validates user input. Spaces, ':' and '-' are ignored so "AB:CD" is accepted.
     /// Problems are described in plain language for the person at the site.
     /// </summary>
+    /// <summary>Upper-cases and removes spaces, ':' and '-' (so "ab:cd" and "AB CD" both become "ABCD").</summary>
+    public static string Clean(string? input) =>
+        new string((input ?? string.Empty).Where(c => !char.IsWhiteSpace(c) && c != ':' && c != '-').ToArray()).ToUpperInvariant();
+
     public static MacSuffixValidation Validate(string? input)
     {
-        var cleaned = new string((input ?? string.Empty)
-            .Where(c => !char.IsWhiteSpace(c) && c is not ':' and not '-')
-            .ToArray()).ToUpperInvariant();
+        var cleaned = Clean(input);
 
         const string Allowed = "A MAC address only uses the numbers 0 to 9 and the letters A to F.";
 
@@ -125,7 +133,7 @@ public sealed class MacSuffix
             return MacSuffixValidation.Invalid("Type the last 4 characters of the MAC address.");
         }
 
-        if (cleaned.Contains('O'))
+        if (cleaned.IndexOf('O') >= 0)
         {
             return MacSuffixValidation.Invalid($"{Allowed} If you see the letter O, type the number 0 (zero).");
         }
@@ -135,7 +143,7 @@ public sealed class MacSuffix
             return MacSuffixValidation.Invalid($"{Allowed} If you see the letter I or L, type the number 1 (one).");
         }
 
-        if (!cleaned.All(char.IsAsciiHexDigit))
+        if (!cleaned.All(Compat.IsHex))
         {
             return MacSuffixValidation.Invalid($"{Allowed} Check the label and try again.");
         }

@@ -7,79 +7,6 @@ using Renci.SshNet.Common;
 
 namespace UniFiAdoption.Core.Ssh;
 
-public sealed record SshBannerResult(bool Reachable, string? Banner, string? Problem);
-
-public interface ISshBannerProbe
-{
-    Task<SshBannerResult> ProbeAsync(IPAddress address, int port, TimeSpan timeout, CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Opens a TCP connection and reads the SSH identification line, without sending any credentials.
-/// This separates "SSH is not available" from "the login was refused".
-/// </summary>
-public sealed class TcpSshBannerProbe : ISshBannerProbe
-{
-    public async Task<SshBannerResult> ProbeAsync(IPAddress address, int port, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeout);
-        using var tcp = new TcpClient(AddressFamily.InterNetwork);
-        try
-        {
-            await tcp.ConnectAsync(address, port, cts.Token).ConfigureAwait(false);
-            var stream = tcp.GetStream();
-            var buffer = new byte[1024];
-            var total = 0;
-            while (total < buffer.Length)
-            {
-                var read = await stream.ReadAsync(buffer.AsMemory(total), cts.Token).ConfigureAwait(false);
-                if (read == 0)
-                {
-                    break;
-                }
-
-                total += read;
-                var identification = FindIdentification(Encoding.ASCII.GetString(buffer, 0, total));
-                if (identification is not null)
-                {
-                    return new SshBannerResult(true, identification, null);
-                }
-            }
-
-            return new SshBannerResult(false, null, "The device accepted a connection on the SSH port but did not identify itself as an SSH server.");
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new SshBannerResult(false, null, $"No SSH answer within {timeout.TotalSeconds:0} seconds.");
-        }
-        catch (SocketException ex)
-        {
-            return new SshBannerResult(false, null, $"SSH connection failed: {ex.SocketErrorCode}.");
-        }
-        catch (IOException ex)
-        {
-            return new SshBannerResult(false, null, $"SSH connection failed: {ex.Message}");
-        }
-    }
-
-    private static string? FindIdentification(string text)
-    {
-        // RFC 4253 allows other lines before the identification string; only complete lines count.
-        var lines = text.Split('\n');
-        for (var i = 0; i < lines.Length - 1; i++)
-        {
-            var line = lines[i].TrimEnd('\r');
-            if (line.StartsWith("SSH-", StringComparison.Ordinal))
-            {
-                return new string(line.Where(c => c >= 0x20 && c < 0x7F).Take(128).ToArray());
-            }
-        }
-
-        return null;
-    }
-}
-
 /// <summary>
 /// SSH via SSH.NET. Chosen over the Windows OpenSSH client because it can authenticate with a
 /// password without a terminal, exposes the host key for verification, and still supports the
@@ -230,7 +157,7 @@ internal sealed class SshNetSession(SshClient client, string? hostKeyAlgorithm, 
             },
             cancellationToken);
 
-    public ValueTask DisposeAsync()
+    public void Dispose()
     {
         try
         {
@@ -247,8 +174,6 @@ internal sealed class SshNetSession(SshClient client, string? hostKeyAlgorithm, 
         {
             client.Dispose();
         }
-
-        return ValueTask.CompletedTask;
     }
 
     private static string SafeRead(Func<string> read)

@@ -54,7 +54,11 @@ public static class DeviceInfoParser
             var match = LinePattern.Match(rawLine.TrimEnd('\r'));
             if (match.Success)
             {
-                fields.TryAdd(match.Groups["key"].Value.Trim(), match.Groups["value"].Value);
+                var key = match.Groups["key"].Value.Trim();
+                if (!fields.ContainsKey(key))
+                {
+                    fields[key] = match.Groups["value"].Value;
+                }
             }
         }
 
@@ -103,7 +107,7 @@ public static class DeviceInfoParser
             return DeviceInformState.NotAdopted;
         }
 
-        string[] inProgress = ["adopting", "unknown", "provision", "pending", "upgrading", "managed by other"];
+        var inProgress = new[] { "adopting", "unknown", "provision", "pending", "upgrading", "managed by other" };
         return inProgress.Any(s.Contains) ? DeviceInformState.InProgress : DeviceInformState.Unrecognized;
     }
 
@@ -133,10 +137,10 @@ public static class ResolveOutputParser
         @"PING\s+\S+\s+\((?<ip>\d{1,3}(?:\.\d{1,3}){3})\)", RegexOptions.CultureInvariant);
 
     private static readonly string[] FailureMarkers =
-    [
+    {
         "bad address", "unknown host", "name or service not known", "temporary failure in name resolution",
         "could not resolve", "no address associated", "nodename nor servname",
-    ];
+    };
 
     public static ResolveCheckResult Parse(string output)
     {
@@ -167,7 +171,7 @@ public static class HostsFile
             var comment = line.IndexOf('#');
             if (comment >= 0)
             {
-                line = line[..comment].Trim();
+                line = line.Substring(0, comment).Trim();
             }
 
             if (line.Length == 0)
@@ -182,7 +186,7 @@ public static class HostsFile
             }
 
             IPAddress? address = null;
-            var hasAddressFirst = tokens[0].Contains('.') && IPAddress.TryParse(tokens[0], out address);
+            var hasAddressFirst = tokens[0].IndexOf('.') >= 0 && IPAddress.TryParse(tokens[0], out address);
             var hostAfterAddress = tokens.Skip(1).Any(t => t.Equals(host, StringComparison.OrdinalIgnoreCase));
             result.Add(hasAddressFirst && hostAfterAddress
                 ? new HostsEntry(address, raw.Trim(), false)
