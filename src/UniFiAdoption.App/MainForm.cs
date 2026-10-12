@@ -11,19 +11,24 @@ namespace UniFiAdoption.App;
 
 internal sealed class MainForm : Form
 {
+    private const int BadgeColumn = 40; // step badge (26) plus its right margin
+
     private readonly SettingsLoadResult _load;
     private readonly AssistantSettings _settings;
     private readonly DiagnosticLog _log = DiagnosticLog.CreateDefault();
     private readonly JsonHostKeyStore _hostKeys;
     private readonly DpapiCredentialStore _credentials = new();
 
+    private readonly BrandBar _brandBar = new();
+    private readonly HeroPanel _hero = new();
     private readonly Panel _scroller = new();
     private readonly TableLayoutPanel _root = new();
+    private readonly TableLayoutPanel _card = new();
     private readonly AccessPointIllustration _illustration = new();
     private readonly TextBox _suffixBox = new();
     private readonly Label _inputHint;
-    private readonly Button _runButton = new();
-    private readonly Button _stopButton = new();
+    private readonly PrimaryButton _runButton = new();
+    private readonly PrimaryButton _stopButton = new();
     private readonly ProgressBar _progress = new();
     private readonly Label _statusLabel;
     private readonly Label _testBanner;
@@ -36,16 +41,18 @@ internal sealed class MainForm : Form
     private readonly Label _footerNote;
     private readonly LinkLabel _itSettingsLink = new();
 
-    // Labels whose wrap width follows the window width.
+    // Labels whose wrap width follows the window width, grouped by where they sit.
     private readonly List<Label> _fullWidthLabels = [];
-    private readonly List<Label> _rightColumnLabels = [];
+    private readonly List<Label> _heroLabels = [];
+    private readonly List<Label> _stepLabels = [];
+    private readonly List<Label> _cardLabels = [];
     private readonly List<Label> _resultLabels = [];
 
     private SshCredential? _sessionCredential;
     private bool _testMode;
     private CancellationTokenSource? _cts;
     private AdoptionReport? _lastReport;
-    private Color _resultAccent = Theme.Accent;
+    private Color _resultAccent = Theme.Brand;
 
     public MainForm(SettingsLoadResult load, bool forceTestMode)
     {
@@ -54,10 +61,10 @@ internal sealed class MainForm : Form
         _testMode = _settings.TestMode || forceTestMode;
         _hostKeys = new JsonHostKeyStore(JsonHostKeyStore.DefaultPath, _settings.PinnedHostKeys);
 
-        _inputHint = Wrap(_rightColumnLabels, "Example: if the label says 802AA812ABCD, type ABCD.", Theme.Small, Theme.Muted, new Padding(0, 4, 0, 14));
+        _inputHint = Wrap(_cardLabels, "Example: if the label says 802AA812ABCD, type ABCD.", Theme.Small, Theme.Muted, new Padding(0, 6, 0, 16));
         _statusLabel = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.Muted, new Padding(0, 2, 0, 8));
-        _testBanner = Wrap(_fullWidthLabels, "Test mode is on. The assistant will find and check the access point but will not change anything.", Theme.Body, Color.FromArgb(0x5C, 0x44, 0x00), new Padding(0, 0, 0, 12));
-        _settingsBanner = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.ErrorText, new Padding(0, 0, 0, 12));
+        _testBanner = Wrap(_fullWidthLabels, "Test mode is on. The assistant will find and check the access point but will not change anything.", Theme.Body, Color.FromArgb(0x5C, 0x44, 0x00), new Padding(0, 0, 0, 14));
+        _settingsBanner = Wrap(_fullWidthLabels, string.Empty, Theme.Body, Theme.ErrorText, new Padding(0, 0, 0, 14));
         _resultTitle = Wrap(_resultLabels, string.Empty, Theme.ResultTitle, Theme.Ink, new Padding(0, 0, 0, 6));
         _resultMessage = Wrap(_resultLabels, string.Empty, Theme.Body, Theme.Ink, new Padding(0, 0, 0, 6));
         _resultSteps = Wrap(_resultLabels, string.Empty, Theme.Body, Theme.Ink, new Padding(0, 2, 0, 4));
@@ -67,13 +74,13 @@ internal sealed class MainForm : Form
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Text = "UniFi Adoption Assistant";
+        Text = $"UniFi Adoption Assistant – {Theme.Organization} {Theme.Team}";
         Font = Theme.Body;
         BackColor = Color.White;
         ForeColor = Theme.Ink;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(880, 780);
-        MinimumSize = new Size(700, 520);
+        ClientSize = new Size(900, 820);
+        MinimumSize = new Size(720, 540);
         try
         {
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -97,6 +104,7 @@ internal sealed class MainForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+
         // Fit smaller screens (for example 1366x768 laptops at 125% scaling).
         var area = Screen.FromControl(this).WorkingArea;
         if (Height > area.Height)
@@ -132,7 +140,7 @@ internal sealed class MainForm : Form
     {
         _scroller.Dock = DockStyle.Fill;
         _scroller.AutoScroll = true;
-        _scroller.Padding = new Padding(28, 20, 28, 20);
+        _scroller.Padding = new Padding(32, 24, 32, 20);
         _scroller.BackColor = Color.White;
         _scroller.Resize += (_, _) => UpdateWrapWidths(); // also fires when the window moves to a screen with different scaling
 
@@ -143,17 +151,12 @@ internal sealed class MainForm : Form
         _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _root.BackColor = Color.White;
 
-        _root.Controls.Add(Wrap(_fullWidthLabels, "Set up a UniFi access point", Theme.Title, Theme.Ink, new Padding(0, 0, 0, 2)));
-        _root.Controls.Add(Wrap(_fullWidthLabels,
-            "This assistant finds the access point on this site's network and connects it to the company's controller.",
-            Theme.Body, Theme.Muted, new Padding(0, 0, 0, 16)));
-
         _testBanner.BackColor = Color.FromArgb(0xFF, 0xF1, 0xB8);
-        _testBanner.Padding = new Padding(10, 8, 10, 8);
+        _testBanner.Padding = new Padding(12, 9, 12, 9);
         _root.Controls.Add(_testBanner);
 
         _settingsBanner.BackColor = Color.FromArgb(0xFD, 0xEC, 0xEA);
-        _settingsBanner.Padding = new Padding(10, 8, 10, 8);
+        _settingsBanner.Padding = new Padding(12, 9, 12, 9);
         _root.Controls.Add(_settingsBanner);
 
         _root.Controls.Add(BuildMainRow());
@@ -173,10 +176,73 @@ internal sealed class MainForm : Form
         _root.Controls.Add(BuildHelpSection());
         _root.Controls.Add(BuildFooter());
         _root.Controls.Add(_footerNote);
-
         _scroller.Controls.Add(_root);
+
+        // Docking order: the control added last takes the outermost edge, so the brand bar sits on
+        // top, the green hero band under it, and the scrolling content fills the rest.
         Controls.Add(_scroller);
+        Controls.Add(BuildHero());
+        Controls.Add(BuildBrandBar());
         AcceptButton = _runButton;
+    }
+
+    private BrandBar BuildBrandBar()
+    {
+        _brandBar.Dock = DockStyle.Top;
+        _brandBar.AutoSize = true;
+        _brandBar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _brandBar.ColumnCount = 2;
+        _brandBar.RowCount = 1;
+        _brandBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _brandBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _brandBar.Padding = new Padding(30, 12, 32, 12);
+
+        Control logo = BrandAssets.Logo is { } image
+            ? new PictureBox
+            {
+                Image = image,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Size = new Size(200, 50),
+                Margin = Padding.Empty,
+                BackColor = Color.White,
+                AccessibleName = Theme.Organization,
+            }
+            : new Label { Text = Theme.Organization, Font = Theme.Title, ForeColor = Theme.Brand, AutoSize = true, Margin = Padding.Empty };
+        _brandBar.Controls.Add(logo, 0, 0);
+
+        var team = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Right,
+            Margin = Padding.Empty,
+            BackColor = Color.White,
+        };
+        team.Controls.Add(new Label { Text = Theme.Team, Font = Theme.TeamName, ForeColor = Theme.Brand, AutoSize = true, Anchor = AnchorStyles.Right, Margin = Padding.Empty, UseMnemonic = false });
+        team.Controls.Add(new Label { Text = Theme.Motto, Font = Theme.MottoFont, ForeColor = Theme.Muted, AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0), UseMnemonic = false });
+        _brandBar.Controls.Add(team, 1, 0);
+        return _brandBar;
+    }
+
+    private HeroPanel BuildHero()
+    {
+        _hero.Dock = DockStyle.Top;
+        _hero.AutoSize = true;
+        _hero.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _hero.ColumnCount = 1;
+        _hero.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _hero.Padding = new Padding(32, 22, 32, 24);
+
+        var title = Wrap(_heroLabels, "Connect a UniFi access point", Theme.Title, Theme.OnBrand, new Padding(0, 0, 0, 6));
+        var subtitle = Wrap(_heroLabels,
+            $"Points the access point at your site to {Theme.Organization}'s centralized UniFi controller, so the {Theme.Team.Replace(" ", "\u00A0")} can manage it remotely.",
+            Theme.Body, Theme.OnBrandSubtle, new Padding(0));
+        title.BackColor = Color.Transparent;
+        subtitle.BackColor = Color.Transparent;
+        _hero.Controls.Add(title);
+        _hero.Controls.Add(subtitle);
+        return _hero;
     }
 
     private TableLayoutPanel BuildMainRow()
@@ -188,13 +254,13 @@ internal sealed class MainForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Dock = DockStyle.Fill,
-            Margin = new Padding(0, 0, 0, 12),
+            Margin = new Padding(0, 0, 0, 14),
         };
         main.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-        _illustration.Size = new Size(270, 300);
-        _illustration.Margin = new Padding(0, 0, 28, 0);
+        _illustration.Size = new Size(260, 290);
+        _illustration.Margin = new Padding(0, 0, 32, 0);
         main.Controls.Add(_illustration, 0, 0);
 
         var right = new TableLayoutPanel
@@ -206,15 +272,53 @@ internal sealed class MainForm : Form
             Margin = Padding.Empty,
         };
         right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        right.Controls.Add(BuildSteps());
+        right.Controls.Add(BuildInputCard());
+        main.Controls.Add(right, 1, 0);
+        return main;
+    }
 
-        right.Controls.Add(Wrap(_rightColumnLabels,
-            "1.  Plug the access point's cable into the POE port of its power adapter, and connect the adapter's LAN port to the router or network switch.\n" +
-            "2.  Wait until the light on the access point is on. This takes about 2 minutes.\n" +
-            "3.  Turn the access point over and find the MAC address on its label.",
-            Theme.Body, Theme.Ink, new Padding(0, 4, 0, 18)));
+    private TableLayoutPanel BuildSteps()
+    {
+        string[] steps =
+        [
+            "Connect the access point's cable to the POE port of its power adapter, and the adapter's LAN port to the site's router or switch.",
+            "Wait about 2 minutes, until the light on the access point is on.",
+            "Read the MAC address on the label on the back of the access point.",
+            "Make sure this computer is on the same office network (cable or staff Wi-Fi, not guest Wi-Fi).",
+        ];
 
-        var inputLabel = Wrap(_rightColumnLabels, "Enter the last 4 characters of the MAC address", Theme.Heading, Theme.Ink, new Padding(0, 0, 0, 6));
-        right.Controls.Add(inputLabel);
+        var list = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 2, 0, 16),
+        };
+        list.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        for (var i = 0; i < steps.Length; i++)
+        {
+            list.Controls.Add(new StepBadge(i + 1) { Margin = new Padding(0, 0, BadgeColumn - 26, 10) }, 0, i);
+            list.Controls.Add(Wrap(_stepLabels, steps[i], Theme.Body, Theme.Ink, new Padding(0, 3, 0, 10)), 1, i);
+        }
+
+        return list;
+    }
+
+    private TableLayoutPanel BuildInputCard()
+    {
+        _card.ColumnCount = 1;
+        _card.AutoSize = true;
+        _card.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _card.Dock = DockStyle.Fill;
+        _card.BackColor = Theme.BrandTint;
+        _card.Padding = new Padding(22, 18, 22, 20);
+        _card.Margin = Padding.Empty;
+        _card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+        _card.Controls.Add(Wrap(_cardLabels, "Enter the last 4 characters of the MAC address", Theme.Heading, Theme.Ink, new Padding(0, 0, 0, 8)));
 
         _suffixBox.Font = Theme.Input;
         _suffixBox.Width = 170;
@@ -222,32 +326,25 @@ internal sealed class MainForm : Form
         _suffixBox.CharacterCasing = CharacterCasing.Upper;
         _suffixBox.TextAlign = HorizontalAlignment.Center;
         _suffixBox.BorderStyle = BorderStyle.FixedSingle;
-        _suffixBox.Margin = new Padding(0);
+        _suffixBox.Margin = Padding.Empty;
         _suffixBox.AccessibleName = "Last 4 characters of the MAC address";
         _suffixBox.TextChanged += (_, _) => OnSuffixChanged();
-        right.Controls.Add(_suffixBox);
-        right.Controls.Add(_inputHint);
+        _card.Controls.Add(_suffixBox);
+        _card.Controls.Add(_inputHint);
 
         _runButton.Text = "Find and Configure Access Point";
         _runButton.Font = Theme.Button;
         _runButton.AutoSize = true;
         _runButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        _runButton.Padding = new Padding(18, 9, 18, 9);
+        _runButton.Padding = new Padding(22, 11, 22, 11);
         _runButton.Margin = new Padding(0, 0, 10, 0);
-        _runButton.FlatStyle = FlatStyle.Flat;
-        _runButton.FlatAppearance.BorderSize = 0;
-        _runButton.FlatAppearance.MouseDownBackColor = Theme.AccentPressed;
-        _runButton.FlatAppearance.MouseOverBackColor = Theme.AccentPressed;
-        _runButton.BackColor = Theme.Accent;
-        _runButton.ForeColor = Color.White;
-        _runButton.UseVisualStyleBackColor = false;
-        _runButton.Cursor = Cursors.Hand;
         _runButton.Click += OnRunClicked;
 
         _stopButton.Text = "Stop";
+        _stopButton.Subdued = true;
         _stopButton.Font = Theme.Body;
         _stopButton.AutoSize = true;
-        _stopButton.Padding = new Padding(12, 7, 12, 7);
+        _stopButton.Padding = new Padding(16, 9, 16, 9);
         _stopButton.Visible = false;
         _stopButton.Click += (_, _) =>
         {
@@ -263,13 +360,12 @@ internal sealed class MainForm : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = true,
             Margin = Padding.Empty,
+            BackColor = Theme.BrandTint,
         };
         buttons.Controls.Add(_runButton);
         buttons.Controls.Add(_stopButton);
-        right.Controls.Add(buttons);
-
-        main.Controls.Add(right, 1, 0);
-        return main;
+        _card.Controls.Add(buttons);
+        return _card;
     }
 
     private TableLayoutPanel BuildResultPanel()
@@ -278,8 +374,8 @@ internal sealed class MainForm : Form
         _resultPanel.AutoSize = true;
         _resultPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         _resultPanel.Dock = DockStyle.Fill;
-        _resultPanel.Padding = new Padding(20, 14, 16, 16);
-        _resultPanel.Margin = new Padding(0, 8, 0, 16);
+        _resultPanel.Padding = new Padding(22, 16, 18, 18);
+        _resultPanel.Margin = new Padding(0, 8, 0, 18);
         _resultPanel.Visible = false;
         _resultPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _resultPanel.Controls.Add(_resultTitle);
@@ -302,18 +398,18 @@ internal sealed class MainForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Dock = DockStyle.Fill,
-            Margin = new Padding(0, 4, 0, 10),
+            Margin = new Padding(0, 6, 0, 12),
         };
         help.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        help.Controls.Add(Wrap(_fullWidthLabels, "Having trouble?", Theme.Heading, Theme.Ink, new Padding(0, 0, 0, 6)));
+        help.Controls.Add(Wrap(_fullWidthLabels, "Troubleshooting", Theme.Heading, Theme.Brand, new Padding(0, 0, 0, 8)));
         help.Controls.Add(Wrap(_fullWidthLabels, string.Join("\n",
-            "•  No light on the access point: check that its cable goes into the POE port of the power adapter, and that the adapter is plugged in and switched on.",
-            "•  The access point and this computer must be on the same network. Use the office network, not a guest Wi-Fi network.",
+            "•  No light on the access point: check that its cable is in the POE port of the power adapter and that the adapter has power.",
+            "•  Not found: this computer and the access point must be on the same network segment. Guest or isolated Wi-Fi will not work.",
             "•  If the access point was only just plugged in, wait 2 minutes and try again.",
-            "•  Check the 4 characters again. The letters only go from A to F, so an O is always the number 0.",
-            "•  Trying again is safe. The assistant only changes the access point whose characters you typed, and only after it has checked it.",
-            "•  Don't press the reset button on the access point unless IT asks you to.",
-            $"•  Still stuck? Click “Copy details for IT” and send the details to {_settings.SupportContact}."),
+            "•  The MAC address only uses 0 to 9 and A to F, so an O on the label is always the number 0.",
+            "•  Running it again is safe. Only the access point you identify is changed, and only after it has been verified.",
+            "•  Login refused: the access point was set up before. Enter its login under Admin settings, or factory-reset it if agreed with the ITO Networks Team.",
+            $"•  Still stuck? Click “Copy support details” and send them to {_settings.SupportContact}."),
             Theme.Body, Theme.Ink, new Padding(0)));
         return help;
     }
@@ -326,7 +422,7 @@ internal sealed class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = true,
-            Margin = new Padding(0, 6, 0, 0),
+            Margin = new Padding(0, 8, 0, 0),
         };
 
         LinkLabel Link(string text, Action action)
@@ -336,24 +432,33 @@ internal sealed class MainForm : Form
                 Text = text,
                 AutoSize = true,
                 Font = Theme.Body,
-                LinkColor = Theme.Accent,
-                ActiveLinkColor = Theme.AccentPressed,
-                Margin = new Padding(0, 0, 22, 0),
+                LinkColor = Theme.Brand,
+                ActiveLinkColor = Theme.BrandDeep,
+                VisitedLinkColor = Theme.Brand,
+                Margin = new Padding(0, 0, 24, 0),
             };
             link.LinkClicked += (_, _) => action();
             return link;
         }
 
-        footer.Controls.Add(Link("Copy details for IT", CopyDetails));
+        footer.Controls.Add(Link("Copy support details", CopyDetails));
         footer.Controls.Add(Link("Open log folder", OpenLogFolder));
-        _itSettingsLink.Text = "IT settings";
+        _itSettingsLink.Text = "Admin settings";
         _itSettingsLink.AutoSize = true;
         _itSettingsLink.Font = Theme.Body;
-        _itSettingsLink.LinkColor = Theme.Accent;
-        _itSettingsLink.Margin = new Padding(0, 0, 22, 0);
+        _itSettingsLink.LinkColor = Theme.Brand;
+        _itSettingsLink.ActiveLinkColor = Theme.BrandDeep;
+        _itSettingsLink.Margin = new Padding(0, 0, 24, 0);
         _itSettingsLink.LinkClicked += (_, _) => OpenItSettings();
         footer.Controls.Add(_itSettingsLink);
-        footer.Controls.Add(new Label { Text = $"Version {AdoptionReport.AssistantVersion}", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Small, Margin = new Padding(0, 2, 0, 0) });
+        footer.Controls.Add(new Label
+        {
+            Text = $"{Theme.Organization} {Theme.Team}  |  Version {AdoptionReport.AssistantVersion}",
+            AutoSize = true,
+            ForeColor = Theme.Muted,
+            Font = Theme.Small,
+            Margin = new Padding(0, 2, 0, 0),
+        });
         return footer;
     }
 
@@ -432,7 +537,6 @@ internal sealed class MainForm : Form
     private void SetRunning(bool running)
     {
         _runButton.Enabled = !running;
-        _runButton.BackColor = running ? Theme.Line : Theme.Accent;
         _suffixBox.ReadOnly = running;
         _stopButton.Visible = running;
         _stopButton.Enabled = running;
@@ -506,7 +610,7 @@ internal sealed class MainForm : Form
         try
         {
             Clipboard.SetText(text);
-            _footerNote.Text = "Details copied. Paste them into an email or chat message to IT.";
+            _footerNote.Text = $"Details copied. Paste them into an email or chat message to {_settings.SupportContact}.";
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
@@ -535,7 +639,7 @@ internal sealed class MainForm : Form
         dialog.ShowDialog(this);
         _sessionCredential = dialog.SessionCredential;
         _testMode = dialog.TestMode;
-        _log.Info($"IT settings closed. Test mode: {_testMode}. Session login set: {_sessionCredential is not null}.");
+        _log.Info($"Admin settings closed. Test mode: {_testMode}. Session login set: {_sessionCredential is not null}.");
         UpdateBanners();
     }
 
@@ -569,6 +673,7 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Sets each label's maximum width so long text wraps to the window width.</summary>
+    /// <summary>Sets each label's maximum width so long text wraps to the window width.</summary>
     private void UpdateWrapWidths()
     {
         var full = _scroller.ClientSize.Width - _scroller.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth;
@@ -577,28 +682,33 @@ internal sealed class MainForm : Form
             return;
         }
 
-        foreach (var label in _fullWidthLabels)
-        {
-            label.MaximumSize = new Size(Math.Max(80, full - label.Margin.Horizontal), 0);
-        }
-
-        // Banners fill the full width so their background reads as a strip.
+        // Keep hero text clear of the leaf on the right.
+        var hero = (int)((ClientSize.Width - _hero.Padding.Horizontal) * 0.8);
+        SetWidths(_heroLabels, hero);
+        SetWidths(_fullWidthLabels, full);
         foreach (var banner in new[] { _testBanner, _settingsBanner })
         {
             banner.MinimumSize = new Size(banner.MaximumSize.Width, 0);
         }
 
         var right = full - _illustration.Width - _illustration.Margin.Horizontal;
-        foreach (var label in _rightColumnLabels)
-        {
-            label.MaximumSize = new Size(Math.Max(80, right - label.Margin.Horizontal), 0);
-        }
+        SetWidths(_stepLabels, right - LogicalToDeviceUnitsSafe(BadgeColumn));
+        SetWidths(_cardLabels, right - _card.Padding.Horizontal);
+        SetWidths(_resultLabels, full - _resultPanel.Padding.Horizontal);
+    }
 
-        var inner = full - _resultPanel.Padding.Horizontal;
-        foreach (var label in _resultLabels)
+    private static void SetWidths(IEnumerable<Label> labels, int width)
+    {
+        foreach (var label in labels)
         {
-            label.MaximumSize = new Size(Math.Max(80, inner - label.Margin.Horizontal), 0);
+            label.MaximumSize = new Size(Math.Max(80, width - label.Margin.Horizontal), 0);
         }
+    }
+
+    private int LogicalToDeviceUnitsSafe(int value)
+    {
+        using var g = CreateGraphics();
+        return (int)Math.Round(value * g.DpiX / 96f);
     }
 
     private static Label Wrap(List<Label> group, string text, Font font, Color color, Padding margin)

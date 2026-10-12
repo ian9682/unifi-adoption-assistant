@@ -8,8 +8,9 @@
   ./build/publish.ps1 -CertificatePath C:\certs\codesign.pfx -CertificatePassword (Read-Host -AsSecureString)
 
 .OUTPUTS
-  artifacts\UniFiAdoptionAssistant-win-x86.zip     portable copy (exe + settings files)
-  artifacts\UniFiAdoptionAssistant-Setup.exe       per-user installer (if Inno Setup 6 is installed)
+  artifacts\UniFiAdoptionAssistant.exe             the app: one self-contained file, nothing to install
+  artifacts\UniFiAdoptionAssistant-Setup.exe       optional per-user installer (if Inno Setup 6 is installed)
+  artifacts\UniFiAdoptionAssistant-portable.zip    only when -SettingsFile is given: exe + settings.json
   artifacts\SHA256SUMS.txt                         checksums for the files above
 #>
 [CmdletBinding()]
@@ -72,9 +73,14 @@ if ($SettingsFile) { Copy-Item $SettingsFile (Join-Path $publishDir 'settings.js
 
 Invoke-Sign $exe
 
-Write-Host '== Creating portable zip'
-$zip = Join-Path $artifacts "UniFiAdoptionAssistant-$Runtime.zip"
-Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zip -Force
+# The standalone exe is the main deliverable. A zip is only needed to carry a custom settings.json.
+$portableExe = Join-Path $artifacts 'UniFiAdoptionAssistant.exe'
+Copy-Item $exe $portableExe
+$zip = Join-Path $artifacts 'UniFiAdoptionAssistant-portable.zip'
+if ($SettingsFile) {
+    Write-Host '== Creating portable zip with settings.json'
+    Compress-Archive -Path $exe, (Join-Path $publishDir 'settings.json') -DestinationPath $zip -Force
+}
 
 $iscc = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -87,10 +93,10 @@ if ($iscc) {
     Invoke-Checked { & $iscc "/DAppVersion=$Version" "/DSourceDir=$publishDir" "/O$artifacts" (Join-Path $root 'installer\UniFiAdoptionAssistant.iss') } 'Inno Setup'
     Invoke-Sign $setup
 } else {
-    Write-Warning 'Inno Setup 6 not found; skipping the installer. The portable zip was still created.'
+    Write-Warning 'Inno Setup 6 not found; skipping the installer. The standalone exe was still created.'
 }
 
-$files = @($zip) + @(if (Test-Path $setup) { $setup })
+$files = @($portableExe) + @($setup, $zip | Where-Object { Test-Path $_ })
 $files | ForEach-Object {
     $hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $(Split-Path $_ -Leaf)"

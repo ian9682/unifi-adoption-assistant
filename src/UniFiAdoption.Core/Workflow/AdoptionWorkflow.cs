@@ -206,7 +206,7 @@ public sealed class AdoptionWorkflow(AssistantSettings settings, WorkflowDepende
         if (credentials.Count == 0)
         {
             run.NoLoginAvailable = true;
-            log.Warn("No login available: factory login disabled and none provided by IT.");
+            log.Warn("No login available: factory login disabled and none entered in Admin settings.");
             return (AdoptionOutcome.AuthenticationFailed, null, null);
         }
 
@@ -243,7 +243,7 @@ public sealed class AdoptionWorkflow(AssistantSettings settings, WorkflowDepende
             {
                 log.Error(ex.Message);
                 run.Notes.Add(ex.Message);
-                run.Notes.Add("If the access point was factory reset, IT can clear saved fingerprints under IT settings.");
+                run.Notes.Add("If the access point was factory reset, saved fingerprints can be cleared under Admin settings.");
                 return (AdoptionOutcome.HostKeyMismatch, null, null);
             }
             catch (SshUnavailableException ex)

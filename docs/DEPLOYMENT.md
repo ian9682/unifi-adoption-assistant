@@ -1,4 +1,4 @@
-# Deployment guide for IT
+# Deployment guide for the ITO Networks Team
 
 ## 1. Before the first rollout
 
@@ -28,18 +28,34 @@ Outputs in `artifacts\`:
 
 * `UniFiAdoptionAssistant-Setup.exe` — per-user installer. It needs no admin rights, creates Start menu
   entries (normal and test mode) and an optional desktop shortcut.
-* `UniFiAdoptionAssistant-win-x86.zip` — portable copy. Unzip it and run the exe.
+* `UniFiAdoptionAssistant.exe` — the whole app in one file. Download and double-click; nothing to install.
 * `SHA256SUMS.txt`
 
-**Code signing is strongly recommended.** Unsigned downloads show *Windows protected your PC*
-(SmartScreen), which remote staff may not get past. Sign with an organisation code-signing certificate
+### The blue "Windows protected your PC" screen (SmartScreen)
+
+Windows shows it for any downloaded program that is not signed with a code-signing certificate, or
+that is signed but not yet well known. No change inside the program can switch it off. The options are:
+
+* **For testing now:** right-click the exe → **Properties** → tick **Unblock** → **OK**. It then opens
+  without the blue screen on that PC. Alternatively, click **More info → Run anyway** once.
+* **Deploy through Intune / Company Portal** (or another managed software tool) if One Acre Fund
+  computers are managed. Apps installed this way are not marked as downloaded, so SmartScreen does
+  not appear. This is the cleanest option for a known group of staff laptops.
+* **Sign the exe and installer.** Microsoft's Azure Artifact Signing (formerly Trusted Signing) is the
+  cheapest route for an organisation; a certificate from a commercial CA also works. Signed files
+  build SmartScreen reputation over time, so the warning may still appear for the first downloads of
+  a new release.
+* Windows 11 PCs with **Smart App Control** turned on block unsigned apps outright, with no "Run
+  anyway" option. On those PCs, signing is required.
+
+Signing details: Sign with an organisation code-signing certificate
 (`-CertificatePath`/`-CertificatePassword`, or the CI secrets `SIGNING_CERT_PFX_BASE64` and
 `SIGNING_CERT_PASSWORD`). A cloud signing service such as Azure Artifact Signing also works; add its
 step after publishing.
 
 ## 3. Host it at a stable link
 
-Keep the file names constant (`UniFiAdoptionAssistant-Setup.exe`), so one link always serves the newest
+Keep the file names constant (`UniFiAdoptionAssistant.exe`, `UniFiAdoptionAssistant-Setup.exe`), so one link always serves the newest
 version. Pick one option:
 
 * **GitHub Releases (public repository).** Push a tag (`git tag v1.0.0 && git push --tags`). The workflow
@@ -55,17 +71,17 @@ version. Pick one option:
   that container. Overwrite the file for new versions. Publish `SHA256SUMS.txt` next to it.
 
 Share the link with a short instruction ("Download, open, follow the screen"). For sites with slow
-connections, the portable zip can be copied by USB stick.
+connections, the exe can be copied by USB stick.
 
 ## 4. Supporting a site remotely
 
-* Ask the person to click **Copy details for IT** and paste the result into chat or email. It contains
+* Ask the person at the site to click **Copy support details** and paste the result into chat or email. It contains
   the outcome, the device MAC/IP/model/firmware/status, notes, and the recent log, and never a password.
-* If the factory login is refused, the device was set up before. Either open **IT settings** with the
-  person (screen share or dictation), enter the device login, and choose *Use this login*; or have the
+* If the factory login is refused, the device was set up before. Either open **Admin settings** with the
+  person at the site (screen share or dictation), enter the device login, and choose *Use this login*; or have the
   device factory-reset (hold the reset button about 10 seconds while powered).
 * After a factory reset, the device's SSH fingerprint changes. If the same PC configured it before,
-  use **IT settings → Forget saved fingerprints**.
+  use **Admin settings → Forget saved fingerprints**.
 * Logs are in `%LOCALAPPDATA%\UniFiAdoptionAssistant\logs` (**Open log folder**).
 
 ## 5. Updating

@@ -180,7 +180,7 @@ internal static class UserMessages
     {
         var contact = $"Contact {support}";
         var contactLower = $"contact {support}";
-        var contactWithDetails = $"Contact {support} and send them the details (use “Copy details for IT”).";
+        var contactWithDetails = $"Contact {support} and send them the details (use “Copy support details”).";
         var nothingChanged = "Nothing was changed on the access point.";
         var pcCannotReachController = run.FromThisComputer is { PortReachable: false }
             ? " This computer can't reach the controller either, so the internet connection at this site may not be working."
@@ -191,21 +191,21 @@ internal static class UserMessages
             case AdoptionOutcome.Connected:
                 return run.DeviceChanged
                     ? (ResultTone.Success, "Access point connected",
-                        "The access point reports that it is connected to the controller. You don't need to do anything else.",
+                        "The access point reports that it is connected to One Acre Fund's central controller. No further action is needed at this site.",
                         ["Leave the access point plugged in."])
                     : (ResultTone.Success, "Already connected",
                         "This access point already reports that it is connected to the controller, so nothing was changed.",
                         []);
 
             case AdoptionOutcome.PendingAdoption:
-                return (ResultTone.Waiting, "Done here – waiting for IT to approve it",
-                    "The access point now has the controller's address. It will start working after IT approves it in the controller.",
-                    ["Leave the access point plugged in and switched on.", $"Let {support} know it is ready (use “Copy details for IT”)."]);
+                return (ResultTone.Waiting, $"Done here – waiting for approval",
+                    $"The access point is now pointed at One Acre Fund's central controller. It will start working once {support} approves it in the controller.",
+                    ["Leave the access point plugged in and switched on.", $"Let {support} know it is ready (use “Copy support details”)."]);
 
             case AdoptionOutcome.InformSentNotVerified:
-                return (ResultTone.Waiting, "Sent – IT needs to check it",
+                return (ResultTone.Waiting, "Sent – the controller needs checking",
                     "The access point accepted the controller's address, but this assistant couldn't confirm what happened next.",
-                    ["Leave the access point plugged in.", $"Ask {support} to check that it appears in the controller."]);
+                    ["Leave the access point plugged in.", $"Ask {support} to check that it appears in the central controller."]);
 
             case AdoptionOutcome.ControllerUnreachable:
                 return (ResultTone.Waiting, "Set up, but it can't reach the controller yet",
@@ -228,7 +228,7 @@ internal static class UserMessages
 
             case AdoptionOutcome.ControllerRejected:
                 return (ResultTone.Problem, "The controller refused the access point",
-                    "The access point reached the controller, but the controller did not accept it. IT needs to look at this in the controller.",
+                    $"The access point reached the controller, but the controller did not accept it, so {support} needs to check it in the controller.",
                     [contactWithDetails]);
 
             case AdoptionOutcome.DryRunCompleted:
@@ -242,7 +242,7 @@ internal static class UserMessages
 
             case AdoptionOutcome.ConfigurationError:
                 return (ResultTone.Problem, "This copy of the assistant isn't set up correctly",
-                    $"{nothingChanged} {support} needs to fix the assistant's settings.",
+                    $"{nothingChanged} Ask {support} to fix the assistant's settings.",
                     [contactWithDetails]);
 
             case AdoptionOutcome.NoNetwork:
@@ -315,7 +315,7 @@ internal static class UserMessages
                     : $"The access point didn't accept the setup login. This usually means it was set up before and no longer uses its factory login. {nothingChanged}";
                 return (ResultTone.Problem, "The access point didn't accept the login", authMessage,
                     [
-                        $"{contact}. They can enter the right login under IT settings.",
+                        $"{contact}. The correct login can be entered under Admin settings.",
                         $"Don't reset the access point unless {support} asks you to.",
                     ]);
 

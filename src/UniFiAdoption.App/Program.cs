@@ -24,8 +24,8 @@ internal static class Program
 
     private static void ShowUnexpected(Exception exception) =>
         MessageBox.Show(
-            $"Something unexpected went wrong in the assistant.\n\n{exception.GetType().Name}: {exception.Message}\n\nPlease tell your IT team.",
-            "UniFi Adoption Assistant",
+            $"Something unexpected went wrong in the assistant.\n\n{exception.GetType().Name}: {exception.Message}\n\nPlease tell the ITO Networks Team.",
+            "UniFi Adoption Assistant – One Acre Fund",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
 }

@@ -1,6 +1,8 @@
-# UniFi Adoption Assistant
+# UniFi Adoption Assistant — One Acre Fund ITO Networks Team
 
-A small Windows program that points a UniFi AC Pro access point at the central UniFi controller
+*Farmers First!*
+
+Built by the One Acre Fund ITO Networks Team. A small Windows program that points a UniFi AC Pro access point at the central UniFi controller
 (`http://unifi.oneacrefund.org:8080/inform`). The person at the site types the last four characters
 of the access point's MAC address and clicks one button. The program finds that exact device on the
 local network, checks it is the right one, logs in over SSH, sends the controller address, reads back
@@ -8,14 +10,14 @@ the device's status, and says in plain language what happened and what to do nex
 
 ![Main window after a run (rendered with Mono on Linux for verification; on Windows it uses Segoe UI)](docs/screenshot-mono.png)
 
-## For staff at a site
+## Using it at a site
 
 1. Plug the access point's cable into the **POE** port of its power adapter, and connect the adapter's
    **LAN** port to the router or network switch. Wait about 2 minutes until its light is on.
 2. Connect this computer to the same office network (cable or office Wi-Fi, not guest Wi-Fi).
 3. Open **UniFi Adoption Assistant**, type the last 4 characters of the MAC address from the label on
    the back of the access point, and click **Find and Configure Access Point**.
-4. Follow the message that appears. If asked, click **Copy details for IT** and send the details to IT.
+4. Follow the message that appears. If asked, click **Copy support details** and send them to the ITO Networks Team.
 
 Running it again is safe. It changes nothing unless exactly one matching UniFi device is found and
 that device confirms its own MAC address.
@@ -35,7 +37,7 @@ that device confirms its own MAC address.
 | Configure | `mca-cli-op set-inform '<inform URL>'` (see below why not `mca-cli`) | **Yes** |
 | Verify | Polls `mca-cli-op info` for up to 45 s and reports the device's own status | No |
 
-Test mode (IT settings, or start with `--test`) stops before "Configure" and shows the exact commands a
+Test mode (Admin settings, or start with `--test`) stops before "Configure" and shows the exact commands a
 real run would send.
 
 ### About the legacy commands
@@ -89,9 +91,9 @@ Requirements: Windows 10/11 with the [.NET 10 SDK](https://dotnet.microsoft.com/
 ./build/publish.ps1 -Version 1.0.0 -SettingsFile C:\it\settings.json -CertificatePath C:\certs\codesign.pfx -CertificatePassword (Read-Host -AsSecureString)
 ```
 
-The script runs the tests, publishes a self-contained single-file `UniFiAdoptionAssistant.exe`, and
-produces `artifacts\UniFiAdoptionAssistant-win-x86.zip`, `artifacts\UniFiAdoptionAssistant-Setup.exe`
-and `artifacts\SHA256SUMS.txt`. Users need no .NET installation, no administrator rights and no
+The script runs the tests and produces `artifacts\UniFiAdoptionAssistant.exe` (the whole app in one
+file), the optional installer `artifacts\UniFiAdoptionAssistant-Setup.exe`, and `artifacts\SHA256SUMS.txt`.
+GitHub Actions offers the exe and the installer as two separate downloads, so the app is not downloaded twice. Users need no .NET installation, no administrator rights and no
 command prompt. The 32-bit build is deliberate: one file runs on 32-bit and 64-bit Windows 10/11.
 
 The GitHub Actions workflow in `.github/workflows/build.yml` does the same on every push and creates a
@@ -104,6 +106,21 @@ Tests (any OS with the .NET 10 SDK):
 dotnet run --project tests/UniFiAdoption.Tests -c Release
 ```
 
+## Branding
+
+The window uses the One Acre Fund logo green (#2B7F68), defined with the rest of the palette in
+`src/UniFiAdoption.App/Theme.cs`. The logo (`Assets/logo.png`), the white leaf used as the header
+watermark (`Assets/leaf-white.png`) and the leaf app icon (`Assets/app.ico`) were prepared from the
+One Acre Fund logo and are built into the exe. To use a higher-resolution logo from the brand kit,
+replace `Assets/logo.png` with a transparent PNG of the same shape.
+
+## Size
+
+The exe is about 48 MB because it carries its own copy of .NET 10, so nothing has to be installed on
+the PC. Windows Forms apps cannot be safely trimmed in .NET 10. The way to get it down to a few MB is to
+retarget the app to .NET Framework 4.8, which is already built into Windows 10 and 11. That is a
+planned follow-up, to be done after the hardware tests pass.
+
 ## Configuration
 
 Everything has a working default, so no settings file is required. To change something, copy
@@ -113,7 +130,7 @@ Everything has a working default, so no settings file is required. To change som
 | Setting | Default | Purpose |
 |---|---|---|
 | `InformUrl` | `http://unifi.oneacrefund.org:8080/inform` | Controller inform URL (strictly validated) |
-| `SupportContact` | `your IT team` | Used in messages ("Contact your IT team") |
+| `SupportContact` | `the ITO Networks Team` | Used in messages ("Contact the ITO Networks Team") |
 | `AllowFactoryDefaultCredentials` | `true` | Try `ubnt`/`ubnt` on the verified device |
 | `HostsFallbackControllerIp` | empty | Add `<ip> <host>` to the device's `/etc/hosts` if it can't resolve the name |
 | `ExtraUbiquitiOuis` | `[]` | Extra Ubiquiti MAC prefixes to accept |
@@ -124,7 +141,7 @@ Everything has a working default, so no settings file is required. To change som
 | `TestMode` | `false` | Start in test mode |
 | `DeviceImagePath` | empty | Photo to show instead of the built-in drawing |
 
-Device logins are never stored in settings. IT can enter one under **IT settings**, for this session
+Device logins are never stored in settings. IT can enter one under **Admin settings**, for this session
 or saved for the current Windows user (encrypted with Windows DPAPI).
 
 ## Files on the user's computer
@@ -141,12 +158,12 @@ or saved for the current Windows user (encrypted with Windows DPAPI).
   Wi-Fi with client isolation)? Did the access point get a DHCP address? Without DHCP it uses
   192.168.1.20, which is reported as "on a different network" if its discovery reply is received.
 * **Login refused:** the device was adopted before and uses the site's device credentials from its old
-  controller. Enter them under IT settings, or factory-reset the device (hold reset ~10 s).
+  controller. Enter them under Admin settings, or factory-reset the device (hold reset ~10 s).
 * **Security check failed:** the device's SSH key changed, normally after a factory reset. Clear saved
-  fingerprints in IT settings.
+  fingerprints in Admin settings.
 * **Waiting for approval does not progress:** adopt the device in the controller. Also check the
   controller's *Inform Host override* (see the deployment guide).
-* Every run is in the log; **Copy details for IT** puts a summary plus the recent log on the clipboard.
+* Every run is in the log; **Copy support details** puts a summary plus the recent log on the clipboard.
 
 ## Project layout
 
@@ -171,7 +188,7 @@ Verified while building this release:
   remembering, pinning and mismatch, wrong password, closed SSH port, unresolvable controller
   name, and the interactive `mca-cli` fallback over a pseudo-terminal.
 * The window's source compiles against the WinForms API. It was rendered and exercised under
-  Mono on Linux: initial screen, typing, result, test mode, and IT settings.
+  Mono on Linux: initial screen, typing, result, test mode, and Admin settings.
 
 **Not yet verified:**
 

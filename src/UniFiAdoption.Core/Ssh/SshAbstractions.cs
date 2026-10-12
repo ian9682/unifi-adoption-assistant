@@ -21,8 +21,8 @@ public sealed record SshCredential(string Username, string Password, CredentialS
     public string SourceDescription => Source switch
     {
         CredentialSource.FactoryDefault => "factory default login",
-        CredentialSource.ItProvidedThisSession => "login entered by IT for this session",
-        CredentialSource.ItSavedOnThisComputer => "login saved by IT on this computer",
+        CredentialSource.ItProvidedThisSession => "login entered in Admin settings for this session",
+        CredentialSource.ItSavedOnThisComputer => "login saved in Admin settings on this computer",
         _ => "unknown login source",
     };
 

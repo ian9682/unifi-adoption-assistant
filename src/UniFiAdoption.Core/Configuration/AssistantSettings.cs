@@ -16,8 +16,8 @@ public sealed class AssistantSettings
     /// <summary>The inform URL given to the access point.</summary>
     public string InformUrl { get; set; } = "http://unifi.oneacrefund.org:8080/inform";
 
-    /// <summary>How the program refers to support in messages, e.g. "Contact your IT team".</summary>
-    public string SupportContact { get; set; } = "your IT team";
+    /// <summary>How the program refers to support in messages, e.g. "Contact the ITO Networks Team".</summary>
+    public string SupportContact { get; set; } = "the ITO Networks Team";
 
     /// <summary>Try the factory default login (ubnt/ubnt) on the verified device.</summary>
     public bool AllowFactoryDefaultCredentials { get; set; } = true;
@@ -100,7 +100,7 @@ public sealed class AssistantSettings
         SshCommandTimeoutSeconds = Math.Clamp(SshCommandTimeoutSeconds, 3, 300);
         VerifySeconds = Math.Clamp(VerifySeconds, 0, 600);
         VerifyPollSeconds = Math.Clamp(VerifyPollSeconds, 1, 60);
-        SupportContact = string.IsNullOrWhiteSpace(SupportContact) ? "your IT team" : SupportContact.Trim();
+        SupportContact = string.IsNullOrWhiteSpace(SupportContact) ? "the ITO Networks Team" : SupportContact.Trim();
         SupportedModelPrefixes = SupportedModelPrefixes.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList();
     }
 

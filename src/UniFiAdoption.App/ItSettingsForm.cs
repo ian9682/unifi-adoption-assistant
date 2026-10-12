@@ -32,7 +32,7 @@ internal sealed class ItSettingsForm : Form
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Text = "IT settings";
+        Text = "Admin settings";
         Font = Theme.Body;
         BackColor = Color.White;
         ForeColor = Theme.Ink;
@@ -219,11 +219,11 @@ internal sealed class ItSettingsForm : Form
         var answer = MessageBox.Show(this,
             "Forget the security fingerprints of every access point this computer has set up?\n\n" +
             "Only do this if an access point was factory reset.",
-            "IT settings", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            "Admin settings", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
         if (answer == DialogResult.Yes)
         {
             _hostKeys.Clear();
-            MessageBox.Show(this, "Saved fingerprints were cleared.", "IT settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "Saved fingerprints were cleared.", "Admin settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }

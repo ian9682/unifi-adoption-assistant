@@ -12,7 +12,7 @@
 AppId={{8C3E6D1A-3C1B-4D55-9C7B-2F1E9A7B5D10}
 AppName=UniFi Adoption Assistant
 AppVersion={#AppVersion}
-AppPublisher=IT
+AppPublisher=One Acre Fund ITO Networks Team
 DefaultDirName={localappdata}\Programs\UniFi Adoption Assistant
 DefaultGroupName=UniFi Adoption Assistant
 DisableProgramGroupPage=yes

@@ -4,7 +4,7 @@
   // Every value shown here is the built-in default.
 
   "InformUrl": "http://unifi.oneacrefund.org:8080/inform",
-  "SupportContact": "your IT team",
+  "SupportContact": "the ITO Networks Team",
 
   // Factory login of a reset UniFi device (publicly documented). Set to false to require an IT-entered login.
   "AllowFactoryDefaultCredentials": true,

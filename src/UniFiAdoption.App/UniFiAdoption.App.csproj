@@ -4,7 +4,7 @@
        Packaging options (self-contained, single file) are passed by build/publish.ps1. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>UniFiAdoptionAssistant</AssemblyName>
     <RootNamespace>UniFiAdoption.App</RootNamespace>
@@ -13,9 +13,15 @@
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Company>IT</Company>
-    <Description>Points UniFi access points at the central controller.</Description>
+    <Company>One Acre Fund – ITO Networks Team</Company>
+    <Description>Points UniFi access points at One Acre Fund's centralized UniFi controller.</Description>
   </PropertyGroup>
+
+  <!-- One Acre Fund logo and leaf, built into the exe and shown in the header. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\logo.png" LogicalName="logo.png" Condition="Exists('Assets\logo.png')" />
+    <EmbeddedResource Include="Assets\leaf-white.png" LogicalName="leaf-white.png" Condition="Exists('Assets\leaf-white.png')" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\UniFiAdoption.Core\UniFiAdoption.Core.csproj" />

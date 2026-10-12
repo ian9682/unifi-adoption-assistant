@@ -47,10 +47,20 @@ jobs:
           }
           ./build/publish.ps1 -Version '${{ steps.version.outputs.value }}' @sign
 
-      - uses: actions/upload-artifact@v6
+      # Two separate downloads, so nobody has to download the app twice.
+      - name: Upload the app (single exe)
+        uses: actions/upload-artifact@v6
         with:
-          name: UniFiAdoptionAssistant-${{ steps.version.outputs.value }}
-          path: artifacts/*.*
+          name: UniFiAdoptionAssistant-${{ steps.version.outputs.value }}-exe
+          path: artifacts/UniFiAdoptionAssistant.exe
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: UniFiAdoptionAssistant-${{ steps.version.outputs.value }}-installer
+          path: |
+            artifacts/UniFiAdoptionAssistant-Setup.exe
+            artifacts/SHA256SUMS.txt
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -59,8 +69,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create $env:GITHUB_REF_NAME
+          artifacts/UniFiAdoptionAssistant.exe
           artifacts/UniFiAdoptionAssistant-Setup.exe
-          artifacts/UniFiAdoptionAssistant-win-x86.zip
           artifacts/SHA256SUMS.txt
           --title "UniFi Adoption Assistant $env:GITHUB_REF_NAME"
           --generate-notes

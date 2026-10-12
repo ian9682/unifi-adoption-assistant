@@ -49,5 +49,6 @@ against a simulated device only.
 * Only IPv4.
 * English only.
 * The installer and exe are unsigned unless a certificate is provided at build time.
-* The self-contained single-file build is tens of megabytes. That is the cost of needing no .NET
-  installation.
+* The exe is about 48 MB because it includes .NET 10. Retargeting to .NET Framework 4.8 (built into
+  Windows) would bring it to a few MB; that is a planned follow-up.
+* The blue SmartScreen warning cannot be removed from inside the program; see DEPLOYMENT.md.

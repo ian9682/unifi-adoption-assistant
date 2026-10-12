@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 
@@ -26,6 +27,8 @@ internal sealed class AccessPointIllustration : Control
     }
 
     /// <summary>The characters typed so far (shown in the highlight on the label).</summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public string Suffix
     {
         get => _suffix;
@@ -36,6 +39,8 @@ internal sealed class AccessPointIllustration : Control
         }
     }
 
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Image? Photo
     {
         get => _photo;
@@ -70,7 +75,7 @@ internal sealed class AccessPointIllustration : Control
         using var captionFont = new Font("Segoe UI", Math.Max(7f, captionHeight * 0.42f), FontStyle.Regular, GraphicsUnit.Pixel);
         using var captionBrush = new SolidBrush(Theme.Muted);
         using var center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        g.DrawString("Back of the access point", captionFont, captionBrush, new RectangleF(0, height - captionHeight, width, captionHeight), center);
+        g.DrawString("Back of the UniFi AC Pro", captionFont, captionBrush, new RectangleF(0, height - captionHeight, width, captionHeight), center);
     }
 
     private void DrawPhoto(Graphics g, RectangleF area)

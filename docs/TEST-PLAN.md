@@ -39,12 +39,12 @@ firmware line in the field. Record the assistant log for each step.
 
 | # | Setup | Action | Expected |
 |---|---|---|---|
-| 1 | Factory-reset AC Pro, DHCP, PC on same LAN | IT settings → test mode, run | "Test finished"; model/firmware shown; planned command is `mca-cli-op set-inform '…'`. **Check the log:** `command -v mca-cli-op` found it, and `mca-cli-op info` shows *MAC Address* and *Status* lines |
+| 1 | Factory-reset AC Pro, DHCP, PC on same LAN | Admin settings → test mode, run | "Test finished"; model/firmware shown; planned command is `mca-cli-op set-inform '…'`. **Check the log:** `command -v mca-cli-op` found it, and `mca-cli-op info` shows *MAC Address* and *Status* lines |
 | 2 | Same | Real run | "Waiting for IT to approve it"; device appears as pending in the controller |
 | 3 | Same | Adopt in controller, wait for provisioning, run again | Login refused (device now uses controller credentials). This is expected; with IT login entered: "Already connected" |
 | 4 | Wrong last 4 characters | Run | "Access point not found"; no SSH in log |
 | 5 | Two devices ending in the same 4 characters (spoof the MAC on a laptop if needed) | Run | "More than one device matches"; no SSH |
-| 6 | AP adopted elsewhere (non-default login) | Run | "Didn't accept the login"; then enter login in IT settings → success |
+| 6 | AP adopted elsewhere (non-default login) | Run | "Didn't accept the login"; then enter login in Admin settings → success |
 | 7 | Block TCP 8080 to the controller at the router | Real run | "Can't reach the controller yet" |
 | 8 | Router DNS broken for the controller name | Real run | "Can't find the controller yet"; with `HostsFallbackControllerIp` set: one correct `/etc/hosts` line, none added on repeat runs |
 | 9 | AP without DHCP (192.168.1.20) | Run | "Not found" or "on a different network"; no changes |
