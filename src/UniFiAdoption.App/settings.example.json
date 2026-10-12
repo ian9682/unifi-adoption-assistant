@@ -1,0 +1,37 @@
+{
+  // Copy this file to "settings.json" next to UniFiAdoptionAssistant.exe (or to
+  // C:\ProgramData\UniFiAdoptionAssistant\settings.json) and change only what you need.
+  // Every value shown here is the built-in default.
+
+  "InformUrl": "http://unifi.oneacrefund.org:8080/inform",
+  "SupportContact": "your IT team",
+
+  // Factory login of a reset UniFi device (publicly documented). Set to false to require an IT-entered login.
+  "AllowFactoryDefaultCredentials": true,
+
+  // Only if access points cannot resolve the controller name through DNS: the controller's IPv4 address,
+  // added to the access point's /etc/hosts (not kept after the access point restarts). Empty = never touch /etc/hosts.
+  "HostsFallbackControllerIp": "",
+
+  "RequireUbiquitiIdentity": true,
+  "ExtraUbiquitiOuis": [],
+  "SupportedModelPrefixes": [ "UAP" ],
+  "AllowInteractiveMcaCliFallback": true,
+
+  "SshPort": 22,
+  "DiscoveryListenSeconds": 4,
+  "MaxHostsPerInterface": 1024,
+  "ArpParallelism": 64,
+  "SshConnectTimeoutSeconds": 12,
+  "SshCommandTimeoutSeconds": 20,
+  "VerifySeconds": 45,
+  "VerifyPollSeconds": 5,
+
+  // Optional: "80:2A:A8:12:AB:CD": "SHA256:..." to require a specific SSH host key for a device.
+  "PinnedHostKeys": {},
+
+  "TestMode": false,
+
+  // Optional photo of your own access point's label, shown instead of the built-in drawing.
+  "DeviceImagePath": ""
+}

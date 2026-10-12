@@ -1,0 +1,15 @@
+#!/bin/sh
+# Simulated interactive UniFi mca-cli (test fixture only)
+S=/tmp/fake-unifi
+printf 'UBNT# '
+while IFS= read -r line; do
+  set -- $line
+  case "$1" in
+    set-inform) printf '%s' "$2" > $S/inform; printf 'Not Adopted' > $S/state
+                echo "Adoption request sent to '$2'.  Use the controller to complete the adopt process.";;
+    exit|quit) exit 0;;
+    "") ;;
+    *) echo "Unknown command: $1";;
+  esac
+  printf 'UBNT# '
+done

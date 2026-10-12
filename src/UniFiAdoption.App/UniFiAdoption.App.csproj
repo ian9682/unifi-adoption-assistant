@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows window. All logic lives in UniFiAdoption.Core; this project is presentation only.
+       Packaging options (self-contained, single file) are passed by build/publish.ps1. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>UniFiAdoptionAssistant</AssemblyName>
+    <RootNamespace>UniFiAdoption.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Company>IT</Company>
+    <Description>Points UniFi access points at the central controller.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UniFiAdoption.Core\UniFiAdoption.Core.csproj" />
+  </ItemGroup>
+
+</Project>

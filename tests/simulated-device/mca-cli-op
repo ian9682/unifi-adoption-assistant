@@ -1,0 +1,23 @@
+#!/bin/sh
+# Simulated UniFi mca-cli-op (test fixture only)
+S=/tmp/fake-unifi
+case "$1" in
+  info)
+    cat <<EOT
+Model:       UAP-AC-Pro-Gen2
+Version:     6.6.77.15402
+MAC Address: $(cat $S/mac)
+IP Address:  127.0.0.1
+Hostname:    UBNT
+Uptime:      100 seconds
+
+Status:      $(cat $S/state) ($(cat $S/inform))
+EOT
+    ;;
+  set-inform)
+    [ -n "$2" ] || { echo "Usage: set-inform <url>"; exit 1; }
+    printf '%s' "$2" > $S/inform; printf 'Not Adopted' > $S/state
+    echo "Adoption request sent to '$2'.  Use the controller to complete the adopt process."
+    ;;
+  *) echo "Unknown command"; exit 1;;
+esac
